@@ -1,0 +1,23 @@
+name: HoplitePlugin
+main: com.example.hoplite.HoplitePlugin
+version: 1.21.0
+api-version: 1.21
+description: "Four‑lobby queueing battle plugin using Multiverse and TerraformGenerator"
+authors: ["Hoplite"]
+commands:
+  queue:
+    description: "Join the game queue or enter a lobby"
+  q:
+    description: "Alias for /queue"
+  elo:
+    description: "See your current ELO rating"
+  eloleader:
+    description: "Display the ELO leaderboard (top 10)"
+  cbal:
+    description: "Check your coin balance"
+  cleader:
+    description: "Display the coin leaderboard (top 10)"
+  coingive:
+    description: "Give coins to another player"
+  k:
+    description: "Open the kits menu to purchase kits"

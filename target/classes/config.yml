@@ -1,0 +1,24 @@
+# hoplite-plugin configuration
+# define as many lobbies as you want; each entry needs a lobbyWorld (must already exist on server)
+# and a corresponding gameWorld name (will be generated/removed automatically).
+# optional maxPlayers and minPlayers per lobby (defaults 10 and 5).
+
+lobbies:
+  - lobbyWorld: qwait1
+    gameWorld: game1
+    maxPlayers: 10
+    minPlayers: 5
+  - lobbyWorld: qwait2
+    gameWorld: game2
+    maxPlayers: 10
+    minPlayers: 5
+  - lobbyWorld: qwait3
+    gameWorld: game3
+    maxPlayers: 10
+    minPlayers: 5
+  - lobbyWorld: qwait4
+    gameWorld: game4
+    maxPlayers: 10
+    minPlayers: 5
+
+# elo values are stored automatically under the "elo" section
