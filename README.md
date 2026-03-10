@@ -58,6 +58,7 @@ need manual editing.
 | `/queue` or `/q` | Join an available lobby or the waiting queue |
 | `/elo`     | Show your current rating |
 | `/eloleader` | View the top‑10 leaderboard |
+| `/leaveq` | Leave your Queue |
 
 ## Build & Install
 
