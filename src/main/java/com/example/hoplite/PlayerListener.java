@@ -10,6 +10,9 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.block.Block;
+import org.bukkit.Material;
 
 
 public class PlayerListener implements Listener {
@@ -61,20 +64,43 @@ public class PlayerListener implements Listener {
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent e) {
-        if (e.getView().getTitle().equals("Kits Menu")) {
+        if (e.getView().getTitle().equals("§e§lKits Menu")) {
             e.setCancelled(true);
             Player p = (Player) e.getWhoClicked();
             int slot = e.getRawSlot();
             if (slot >= 0 && slot < KitData.KITS.size()) {
                 KitData.Kit kit = KitData.KITS.get(slot);
-                if (plugin.removeCoins(p.getUniqueId(), kit.price)) {
-                    kit.grantToPlayer(p);
-                    p.sendMessage("Kit '" + kit.name + "' purchased!");
-                    p.closeInventory();
-                } else {
-                    p.sendMessage("You don't have enough coins. Need: " + kit.price);
+                if (e.isLeftClick()) {
+                    // Buy kit
+                    if (plugin.removeCoins(p.getUniqueId(), kit.price)) {
+                        kit.grantToPlayer(p);
+                        p.sendMessage("§aKit '" + kit.name + "' purchased!");
+                        p.closeInventory();
+                    } else {
+                        p.sendMessage("§cYou don't have enough coins. Need: " + kit.price);
+                    }
+                } else if (e.isRightClick()) {
+                    // Preview kit
+                    Inventory preview = Bukkit.createInventory(null, 27, "§6Preview: " + kit.name);
+                    for (org.bukkit.inventory.ItemStack item : kit.items) {
+                        preview.addItem(item.clone());
+                    }
+                    p.openInventory(preview);
                 }
             }
         }
     }
+
+    @EventHandler
+    public void onInventoryClick2(InventoryClickEvent e) {
+        // Prevent editing preview/menu inventories — block ALL interactions
+        String title = e.getView().getTitle();
+        if (title.startsWith("§6Preview:") || title.equals("§e§lKits Menu")) {
+            e.setCancelled(true);
+            if (title.startsWith("§6Preview:")) {
+                ((Player)e.getWhoClicked()).sendMessage("§cYou cannot modify the preview.");
+            }
+        }
+    }
 }
+

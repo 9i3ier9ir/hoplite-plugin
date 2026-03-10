@@ -33,6 +33,9 @@ public class HopliteCommand implements CommandExecutor {
             case "q":
                 handleQueue(p);
                 return true;
+            case "leaveq":
+                handleLeaveQ(p);
+                return true;
             case "elo":
                 int rating = plugin.getElo(p.getUniqueId());
                 p.sendMessage("Your ELO: " + rating);
@@ -126,16 +129,46 @@ public class HopliteCommand implements CommandExecutor {
             }
         }
         
-        Inventory inv = Bukkit.createInventory(null, 45, "Kits Menu");
+        Inventory inv = Bukkit.createInventory(null, 45, "§e§lKits Menu");
         for (int i = 0; i < KitData.KITS.size(); i++) {
             KitData.Kit kit = KitData.KITS.get(i);
-            ItemStack is = new ItemStack(Material.PAPER);
+            ItemStack is = new ItemStack(kit.icon);
             ItemMeta meta = is.getItemMeta();
-            meta.setDisplayName(kit.name + " - " + kit.price + " coins");
+            meta.setDisplayName("§6" + kit.name);
+            java.util.List<String> lore = new java.util.ArrayList<>();
+            lore.add("§eCost: §6" + kit.price + " coins");
+            lore.add("§7Right-click to preview");
+            meta.setLore(lore);
             is.setItemMeta(meta);
             inv.setItem(i, is);
         }
         p.openInventory(inv);
     }
+
+    private void handleLeaveQ(Player p) {
+        UUID id = p.getUniqueId();
+        boolean found = false;
+        
+        // Check lobbies
+        for (Lobby l : plugin.getLobbies()) {
+            if (l.hasPlayer(id)) {
+                l.removePlayer(p);
+                p.sendMessage("§cYou left the queue.");
+                found = true;
+                break;
+            }
+        }
+        
+        // Check waiting queue
+        if (!found && plugin.getWaitingQueue().remove(id)) {
+            p.sendMessage("§cYou left the global waiting queue.");
+            found = true;
+        }
+        
+        if (!found) {
+            p.sendMessage("§cYou are not in any queue.");
+        }
+    }
+
 }
 

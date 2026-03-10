@@ -4,5 +4,6 @@ com/example/hoplite/KitData$KitPotion.class
 com/example/hoplite/HopliteCommand.class
 com/example/hoplite/PlayerListener.class
 com/example/hoplite/Lobby.class
-com/example/hoplite/Lobby$1.class
+com/example/hoplite/ChestSpawner.class
+com/example/hoplite/ChestSpawner$Rarity.class
 com/example/hoplite/KitData.class

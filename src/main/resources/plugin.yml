@@ -9,6 +9,8 @@ commands:
     description: "Join the game queue or enter a lobby"
   q:
     description: "Alias for /queue"
+  leaveq:
+    description: "Leave the current queue or lobby"
   elo:
     description: "See your current ELO rating"
   eloleader:

@@ -13,6 +13,11 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
 
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.ShapedRecipe;
+
 public class HoplitePlugin extends JavaPlugin {
     private final Map<Integer, Lobby> lobbies = new HashMap<>();
     private final Queue<UUID> waitingQueue = new LinkedList<>();
@@ -59,6 +64,10 @@ public class HoplitePlugin extends JavaPlugin {
         getCommand("cleader").setExecutor(executor);
         getCommand("coingive").setExecutor(executor);
         getCommand("k").setExecutor(executor);
+        getCommand("leaveq").setExecutor(executor);
+
+        // custom recipes
+        addCustomRecipes();
 
         getLogger().info("HoplitePlugin enabled.");
     }
@@ -136,6 +145,25 @@ public class HoplitePlugin extends JavaPlugin {
             sender.sendMessage(rank + ". " + name + " - " + e.getValue());
             rank++;
         }
+    }
+
+    private void addCustomRecipes() {
+        // golden apple recipe: 8 gold ingots around apple
+        NamespacedKey gaKey = new NamespacedKey(this, "custom_golden_apple");
+        ShapedRecipe ga = new ShapedRecipe(gaKey, new ItemStack(Material.GOLDEN_APPLE));
+        ga.shape("GGG", "GAG", "GGG");
+        ga.setIngredient('G', Material.GOLD_INGOT);
+        ga.setIngredient('A', Material.APPLE);
+        getServer().addRecipe(ga);
+
+        // auto-smelter pickaxe: iron pickaxe with coal in top corners
+        NamespacedKey apKey = new NamespacedKey(this, "autosmelter_pickaxe");
+        ItemStack auto = new ItemStack(Material.IRON_PICKAXE);
+        ShapedRecipe ap = new ShapedRecipe(apKey, auto);
+        ap.shape("CIC", " I ", " I ");
+        ap.setIngredient('C', Material.COAL);
+        ap.setIngredient('I', Material.IRON_INGOT);
+        getServer().addRecipe(ap);
     }
 
     // Coin management
