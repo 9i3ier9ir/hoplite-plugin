@@ -8,6 +8,7 @@ import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -36,6 +37,7 @@ public class PlayerListener implements Listener {
         }
         // also remove from waiting queue if present
         plugin.getWaitingQueue().remove(p.getUniqueId());
+        plugin.getWaitingQueueDuos().remove(p.getUniqueId());
     }
 
     @EventHandler
@@ -58,6 +60,25 @@ public class PlayerListener implements Listener {
             if (l.hasPlayer(p.getUniqueId())) {
                 // mark as dead/eliminated
                 l.playerDied(p.getUniqueId());
+            }
+        }
+    }
+
+    @EventHandler
+    public void onEntityDamage(EntityDamageByEntityEvent e) {
+        if (!(e.getDamager() instanceof Player) || !(e.getEntity() instanceof Player)) return;
+        Player attacker = (Player) e.getDamager();
+        Player victim = (Player) e.getEntity();
+        for (Lobby l : plugin.getLobbies()) {
+            if (l.hasPlayer(attacker.getUniqueId()) && l.hasPlayer(victim.getUniqueId())) {
+                if ("duos".equalsIgnoreCase(l.getMode())) {
+                    java.util.UUID mate = l.getTeammate(attacker.getUniqueId());
+                    if (mate != null && mate.equals(victim.getUniqueId())) {
+                        e.setCancelled(true);
+                        attacker.sendMessage("§cYou cannot hurt your teammate.");
+                        return;
+                    }
+                }
             }
         }
     }

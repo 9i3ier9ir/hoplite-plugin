@@ -12,6 +12,9 @@ import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
+import java.io.File;
+import org.bukkit.configuration.file.YamlConfiguration;
+import java.io.IOException;
 
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -21,14 +24,20 @@ import org.bukkit.inventory.ShapedRecipe;
 public class HoplitePlugin extends JavaPlugin {
     private final Map<Integer, Lobby> lobbies = new HashMap<>();
     private final Queue<UUID> waitingQueue = new LinkedList<>();
+    private final Queue<UUID> waitingQueueDuos = new LinkedList<>();
     private final Map<UUID,Integer> elo = new HashMap<>();
     private final Map<UUID,Long> coins = new HashMap<>();
+    private File eloFile;
+    private File coinsFile;
+    private YamlConfiguration eloYaml;
+    private YamlConfiguration coinsYaml;
 
     @Override
     public void onEnable() {
         getLogger().info("HoplitePlugin enabling...");
 
         saveDefaultConfig();
+        setupDataFiles();
         loadElo();
         loadCoins();
 
@@ -40,6 +49,7 @@ public class HoplitePlugin extends JavaPlugin {
             String gameWorld = (String)entry.get("gameWorld");
             int max = entry.containsKey("maxPlayers") ? ((Number)entry.get("maxPlayers")).intValue() : 10;
             int min = entry.containsKey("minPlayers") ? ((Number)entry.get("minPlayers")).intValue() : 5;
+            String mode = entry.containsKey("mode") ? (String)entry.get("mode") : "singles";
 
             World w = Bukkit.getWorld(lobbyWorld);
             if (w == null) {
@@ -47,7 +57,7 @@ public class HoplitePlugin extends JavaPlugin {
                 // do not disable plugin; just skip this lobby
                 continue;
             }
-            Lobby lobby = new Lobby(this, id++, lobbyWorld, gameWorld, max, min);
+            Lobby lobby = new Lobby(this, id++, lobbyWorld, gameWorld, max, min, mode);
             lobbies.put(lobby.getId(), lobby);
         }
 
@@ -86,6 +96,10 @@ public class HoplitePlugin extends JavaPlugin {
         return lobbies.get(id);
     }
 
+    public Queue<UUID> getWaitingQueueDuos() {
+        return waitingQueueDuos;
+    }
+
     public Queue<UUID> getWaitingQueue() {
         return waitingQueue;
     }
@@ -96,11 +110,11 @@ public class HoplitePlugin extends JavaPlugin {
 
     // ELO management
     private void loadElo() {
-        if (getConfig().contains("elo")) {
-            for (String key : getConfig().getConfigurationSection("elo").getKeys(false)) {
+        if (eloYaml != null && eloYaml.contains("elo")) {
+            for (String key : eloYaml.getConfigurationSection("elo").getKeys(false)) {
                 try {
                     UUID id = UUID.fromString(key);
-                    int val = getConfig().getInt("elo." + key, 1000);
+                    int val = eloYaml.getInt("elo." + key, 1000);
                     elo.put(id, val);
                 } catch (IllegalArgumentException ignore) {
                 }
@@ -110,7 +124,9 @@ public class HoplitePlugin extends JavaPlugin {
 
     public int getElo(UUID player) {
         return elo.computeIfAbsent(player, u -> {
-            int val = getConfig().getInt("elo." + u.toString(), 1000);
+            int val = 1000;
+            if (eloYaml != null) val = eloYaml.getInt("elo." + u.toString(), 1000);
+            else val = getConfig().getInt("elo." + u.toString(), 1000);
             return val;
         });
     }
@@ -119,8 +135,10 @@ public class HoplitePlugin extends JavaPlugin {
         int current = getElo(player);
         int updated = current + delta;
         elo.put(player, updated);
-        getConfig().set("elo." + player.toString(), updated);
-        saveConfig();
+        if (eloYaml != null) {
+            eloYaml.set("elo." + player.toString(), updated);
+            try { eloYaml.save(eloFile); } catch (IOException ignored) {}
+        }
     }
 
     public void adjustEloAfterMatch(Set<UUID> participants, UUID winner) {
@@ -168,11 +186,11 @@ public class HoplitePlugin extends JavaPlugin {
 
     // Coin management
     private void loadCoins() {
-        if (getConfig().contains("coins")) {
-            for (String key : getConfig().getConfigurationSection("coins").getKeys(false)) {
+        if (coinsYaml != null && coinsYaml.contains("coins")) {
+            for (String key : coinsYaml.getConfigurationSection("coins").getKeys(false)) {
                 try {
                     UUID id = UUID.fromString(key);
-                    long val = getConfig().getLong("coins." + key, 0);
+                    long val = coinsYaml.getLong("coins." + key, 0);
                     coins.put(id, val);
                 } catch (IllegalArgumentException ignore) {
                 }
@@ -182,7 +200,9 @@ public class HoplitePlugin extends JavaPlugin {
 
     public long getCoins(UUID player) {
         return coins.computeIfAbsent(player, u -> {
-            long val = getConfig().getLong("coins." + u.toString(), 0);
+            long val = 0;
+            if (coinsYaml != null) val = coinsYaml.getLong("coins." + u.toString(), 0);
+            else val = getConfig().getLong("coins." + u.toString(), 0);
             return val;
         });
     }
@@ -191,8 +211,10 @@ public class HoplitePlugin extends JavaPlugin {
         long current = getCoins(player);
         long updated = current + amount;
         coins.put(player, updated);
-        getConfig().set("coins." + player.toString(), updated);
-        saveConfig();
+        if (coinsYaml != null) {
+            coinsYaml.set("coins." + player.toString(), updated);
+            try { coinsYaml.save(coinsFile); } catch (IOException ignored) {}
+        }
     }
 
     public boolean removeCoins(UUID player, long amount) {
@@ -200,9 +222,23 @@ public class HoplitePlugin extends JavaPlugin {
         if (current < amount) return false;
         long updated = current - amount;
         coins.put(player, updated);
-        getConfig().set("coins." + player.toString(), updated);
-        saveConfig();
+        if (coinsYaml != null) {
+            coinsYaml.set("coins." + player.toString(), updated);
+            try { coinsYaml.save(coinsFile); } catch (IOException ignored) {}
+        }
         return true;
+    }
+
+    private void setupDataFiles() {
+        if (!getDataFolder().exists()) getDataFolder().mkdirs();
+        eloFile = new File(getDataFolder(), "elo.yml");
+        coinsFile = new File(getDataFolder(), "coins.yml");
+        try {
+            if (!eloFile.exists()) eloFile.createNewFile();
+            if (!coinsFile.exists()) coinsFile.createNewFile();
+        } catch (IOException ignored) {}
+        eloYaml = YamlConfiguration.loadConfiguration(eloFile);
+        coinsYaml = YamlConfiguration.loadConfiguration(coinsFile);
     }
 
     public void sendCoinLeaderboard(org.bukkit.command.CommandSender sender) {

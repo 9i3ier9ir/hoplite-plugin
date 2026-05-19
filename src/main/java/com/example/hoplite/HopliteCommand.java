@@ -31,7 +31,7 @@ public class HopliteCommand implements CommandExecutor {
         switch (cmd) {
             case "queue":
             case "q":
-                handleQueue(p);
+                handleQueue(p, args);
                 return true;
             case "leaveq":
                 handleLeaveQ(p);
@@ -60,7 +60,16 @@ public class HopliteCommand implements CommandExecutor {
         return false;
     }
 
-    private void handleQueue(Player p) {
+    private void handleQueue(Player p, String[] args) {
+        boolean wantDuos = args != null && args.length > 0 && args[0].equalsIgnoreCase("duos");
+        if (wantDuos) {
+            handleQueueDuos(p);
+            return;
+        }
+        handleQueueSingles(p);
+    }
+
+    private void handleQueueSingles(Player p) {
         UUID id = p.getUniqueId();
         // already in a lobby?
         for (Lobby l : plugin.getLobbies()) {
@@ -90,6 +99,36 @@ public class HopliteCommand implements CommandExecutor {
         // all busy/full
         plugin.getWaitingQueue().add(id);
         p.sendMessage("All lobbies are currently full or active. You've been placed in the global queue.");
+    }
+
+    private void handleQueueDuos(Player p) {
+        UUID id = p.getUniqueId();
+        for (Lobby l : plugin.getLobbies()) {
+            if (l.hasPlayer(id)) {
+                p.sendMessage("You are already in a lobby.");
+                return;
+            }
+        }
+        if (plugin.getWaitingQueueDuos().contains(id)) {
+            p.sendMessage("You are already in the duos waiting queue.");
+            return;
+        }
+
+        // find available duo lobby
+        for (Lobby l : plugin.getLobbies()) {
+            if (!l.isActiveGame() && l.getPlayerCount() < l.getMaxPlayers() && "duos".equalsIgnoreCase(l.getMode())) {
+                World lobbyWorld = Bukkit.getWorld(l.getLobbyWorld());
+                if (lobbyWorld != null) {
+                    p.teleport(lobbyWorld.getSpawnLocation());
+                }
+                l.addPlayer(p);
+                p.sendMessage("You have joined duo lobby " + l.getId() + ".");
+                return;
+            }
+        }
+
+        plugin.getWaitingQueueDuos().add(id);
+        p.sendMessage("All duo lobbies are currently full or active. You've been placed in the duo global queue.");
     }
 
     private void handleCoinGive(Player p, String[] args) {
@@ -162,6 +201,10 @@ public class HopliteCommand implements CommandExecutor {
         // Check waiting queue
         if (!found && plugin.getWaitingQueue().remove(id)) {
             p.sendMessage("§cYou left the global waiting queue.");
+            found = true;
+        }
+        if (!found && plugin.getWaitingQueueDuos().remove(id)) {
+            p.sendMessage("§cYou left the duos waiting queue.");
             found = true;
         }
         

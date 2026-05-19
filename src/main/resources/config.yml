@@ -10,15 +10,48 @@ lobbies:
     minPlayers: 5
   - lobbyWorld: qwait2
     gameWorld: game2
-    maxPlayers: 10
-    minPlayers: 5
+    maxPlayers: 20
+    minPlayers: 10
+    mode: duos
   - lobbyWorld: qwait3
     gameWorld: game3
-    maxPlayers: 10
-    minPlayers: 5
+    maxPlayers: 20
+    minPlayers: 10
+    mode: duos
   - lobbyWorld: qwait4
     gameWorld: game4
     maxPlayers: 10
     minPlayers: 5
+  - lobbyWorld: qwait5
+    gameWorld: game5
+    maxPlayers: 10
+    minPlayers: 5
+  - lobbyWorld: qwait6
+    gameWorld: game6
+    maxPlayers: 10
+    minPlayers: 5
+  - lobbyWorld: qwait7
+    gameWorld: game7
+    maxPlayers: 10
+    minPlayers: 5
+  - lobbyWorld: qwait8
+    gameWorld: game8
+    maxPlayers: 10
+    minPlayers: 5
+  - lobbyWorld: qwait9
+    gameWorld: game9
+    maxPlayers: 10
+    minPlayers: 5
+  - lobbyWorld: qwait10
+    gameWorld: game10
+    maxPlayers: 10
+    minPlayers: 5
 
 # elo values are stored automatically under the "elo" section
+
+# Duos configuration - optional. Set per-lobby mode by adding `mode: duos` to a lobby entry.
+duos:
+  enabled: true
+  maxPlayersPerLobby: 20
+  teamSize: 2
+  friendlyFire: false

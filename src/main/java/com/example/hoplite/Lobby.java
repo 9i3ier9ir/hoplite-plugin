@@ -16,6 +16,8 @@ public class Lobby {
     private final String gameWorld;
     private final int maxPlayers;
     private final int minPlayers;
+    private final String mode; // "singles" or "duos"
+    private Map<UUID,UUID> teammates = new HashMap<>();
 
     private final Set<UUID> players = new HashSet<>();
     private Set<UUID> participants = new HashSet<>(); 
@@ -26,12 +28,17 @@ public class Lobby {
     private BukkitTask borderTask;
 
     public Lobby(HoplitePlugin plugin, int id, String lobbyWorld, String gameWorld, int maxPlayers, int minPlayers) {
+        this(plugin, id, lobbyWorld, gameWorld, maxPlayers, minPlayers, "singles");
+    }
+
+    public Lobby(HoplitePlugin plugin, int id, String lobbyWorld, String gameWorld, int maxPlayers, int minPlayers, String mode) {
         this.plugin = plugin;
         this.id = id;
         this.lobbyWorld = lobbyWorld;
         this.gameWorld = gameWorld;
         this.maxPlayers = maxPlayers;
         this.minPlayers = minPlayers;
+        this.mode = mode == null ? "singles" : mode;
     }
 
     // --- GETTERS & STATUS CHECKS (Fixed missing symbols) ---
@@ -41,6 +48,9 @@ public class Lobby {
     public String getGameWorld() { return gameWorld; }
     public int getMaxPlayers() { return maxPlayers; }
     public int getPlayerCount() { return players.size(); }
+
+    public String getMode() { return mode; }
+    public UUID getTeammate(UUID player) { return teammates.get(player); }
 
     public boolean hasPlayer(UUID uuid) {
         return players.contains(uuid);
@@ -117,6 +127,18 @@ public class Lobby {
         participants = new HashSet<>(players);
         Bukkit.broadcastMessage("Starting game for lobby " + id);
 
+        // when duos mode, pair teammates arbitrarily
+        if ("duos".equalsIgnoreCase(mode)) {
+            List<UUID> list = new ArrayList<>(participants);
+            teammates.clear();
+            for (int i = 0; i + 1 < list.size(); i += 2) {
+                UUID a = list.get(i);
+                UUID b = list.get(i+1);
+                teammates.put(a, b);
+                teammates.put(b, a);
+            }
+        }
+
         String cmd = "mv create " + gameWorld + " normal -g TerraformGenerator";
         Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), cmd);
 
@@ -180,19 +202,62 @@ public class Lobby {
             Player p = Bukkit.getPlayer(u);
             if (p != null && p.isOnline() && p.getWorld().getName().equals(gameWorld)) remaining.add(p);
         }
-        if (remaining.size() <= 1) {
-            String winnerName = remaining.size() == 1 ? remaining.get(0).getName() : "No one";
-            if (remaining.size() == 1) {
-                Player winner = remaining.get(0);
-                winner.sendTitle("§a§lYOU WON!", "", 10, 70, 20);
-                plugin.addCoins(winner.getUniqueId(), 50);
+        if ("duos".equalsIgnoreCase(mode)) {
+            // determine remaining teams
+            Set<UUID> aliveTeams = new HashSet<>();
+            for (Player p : remaining) {
+                UUID uid = p.getUniqueId();
+                UUID mate = teammates.get(uid);
+                if (mate != null) {
+                    aliveTeams.add(mate);
+                    aliveTeams.add(uid);
+                } else {
+                    aliveTeams.add(uid);
+                }
             }
-            Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
-            if (remaining.size() == 1) {
-                UUID winnerId = remaining.get(0).getUniqueId();
-                plugin.adjustEloAfterMatch(participants, winnerId);
+            // If zero or one team/player remains, end
+            if (aliveTeams.size() <= 2) {
+                String winnerName = remaining.size() == 1 ? remaining.get(0).getName() : "No one";
+                Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
+                if (remaining.size() >= 1) {
+                    // award both members if team exists
+                    Player pwin = remaining.get(0);
+                    UUID winUid = pwin.getUniqueId();
+                    UUID mate = teammates.get(winUid);
+                    if (mate != null) {
+                        plugin.addCoins(winUid, 50);
+                        plugin.addCoins(mate, 50);
+                        plugin.changeElo(winUid, 25);
+                        plugin.changeElo(mate, 25);
+                        // losers -5
+                        for (UUID part : participants) {
+                            if (!part.equals(winUid) && !part.equals(mate)) plugin.changeElo(part, -5);
+                        }
+                    } else {
+                        plugin.addCoins(winUid, 50);
+                        plugin.changeElo(winUid, 25);
+                        for (UUID part : participants) {
+                            if (!part.equals(winUid)) plugin.changeElo(part, -5);
+                        }
+                    }
+                }
+                endGame();
             }
-            endGame();
+        } else {
+            if (remaining.size() <= 1) {
+                String winnerName = remaining.size() == 1 ? remaining.get(0).getName() : "No one";
+                if (remaining.size() == 1) {
+                    Player winner = remaining.get(0);
+                    winner.sendTitle("§a§lYOU WON!", "", 10, 70, 20);
+                    plugin.addCoins(winner.getUniqueId(), 50);
+                }
+                Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
+                if (remaining.size() == 1) {
+                    UUID winnerId = remaining.get(0).getUniqueId();
+                    plugin.adjustEloAfterMatch(participants, winnerId);
+                }
+                endGame();
+            }
         }
     }
 
