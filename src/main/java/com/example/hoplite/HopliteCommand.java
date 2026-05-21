@@ -83,11 +83,13 @@ public class HopliteCommand implements CommandExecutor {
             return;
         }
 
-        // find available lobby
+        // find available singles lobby
         for (Lobby l : plugin.getLobbies()) {
-            if (!l.isActiveGame() && l.getPlayerCount() < l.getMaxPlayers()) {
-                // teleport and add
+            if (l.isAvailableForSingles()) {
                 World lobbyWorld = Bukkit.getWorld(l.getLobbyWorld());
+                if (lobbyWorld == null) {
+                    lobbyWorld = new org.bukkit.WorldCreator(l.getLobbyWorld()).createWorld();
+                }
                 if (lobbyWorld != null) {
                     p.teleport(lobbyWorld.getSpawnLocation());
                 }
@@ -116,8 +118,11 @@ public class HopliteCommand implements CommandExecutor {
 
         // find available duo lobby
         for (Lobby l : plugin.getLobbies()) {
-            if (!l.isActiveGame() && l.getPlayerCount() < l.getMaxPlayers() && "duos".equalsIgnoreCase(l.getMode())) {
+            if (l.isAvailableForDuos()) {
                 World lobbyWorld = Bukkit.getWorld(l.getLobbyWorld());
+                if (lobbyWorld == null) {
+                    lobbyWorld = new org.bukkit.WorldCreator(l.getLobbyWorld()).createWorld();
+                }
                 if (lobbyWorld != null) {
                     p.teleport(lobbyWorld.getSpawnLocation());
                 }

@@ -2,6 +2,7 @@ package com.example.hoplite;
 
 import org.bukkit.Bukkit;
 import org.bukkit.World;
+import org.bukkit.WorldCreator;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.HashMap;
@@ -53,6 +54,10 @@ public class HoplitePlugin extends JavaPlugin {
 
             World w = Bukkit.getWorld(lobbyWorld);
             if (w == null) {
+                getLogger().info("Lobby world " + lobbyWorld + " is not loaded; attempting to load it.");
+                w = new WorldCreator(lobbyWorld).createWorld();
+            }
+            if (w == null) {
                 getLogger().severe("Configured lobby world missing: " + lobbyWorld + " — check your config.");
                 // do not disable plugin; just skip this lobby
                 continue;
@@ -63,6 +68,16 @@ public class HoplitePlugin extends JavaPlugin {
 
         // register event listeners
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
+
+        // Register PlaceholderAPI expansion if available
+        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            try {
+                new PlaceholderHook(this).register();
+                getLogger().info("Registered PlaceholderAPI expansion (hoplite_elo, hoplite_coins, hoplite_inqueue).");
+            } catch (NoClassDefFoundError e) {
+                getLogger().warning("PlaceholderAPI present but expansion failed to register (build without PAPI?).");
+            }
+        }
 
         // register commands
         HopliteCommand executor = new HopliteCommand(this);
@@ -75,6 +90,13 @@ public class HoplitePlugin extends JavaPlugin {
         getCommand("coingive").setExecutor(executor);
         getCommand("k").setExecutor(executor);
         getCommand("leaveq").setExecutor(executor);
+
+        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new PlaceholderHook(this).register();
+            getLogger().info("Registered PlaceholderAPI expansion.");
+        } else {
+            getLogger().info("PlaceholderAPI not found; skipping PlaceholderAPI expansion.");
+        }
 
         // custom recipes
         addCustomRecipes();

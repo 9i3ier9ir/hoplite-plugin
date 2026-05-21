@@ -52,6 +52,14 @@ public class Lobby {
     public String getMode() { return mode; }
     public UUID getTeammate(UUID player) { return teammates.get(player); }
 
+    public boolean isAvailableForSingles() {
+        return !activeGame && players.size() < maxPlayers && !"duos".equalsIgnoreCase(mode);
+    }
+
+    public boolean isAvailableForDuos() {
+        return !activeGame && players.size() < maxPlayers && "duos".equalsIgnoreCase(mode);
+    }
+
     public boolean hasPlayer(UUID uuid) {
         return players.contains(uuid);
     }
