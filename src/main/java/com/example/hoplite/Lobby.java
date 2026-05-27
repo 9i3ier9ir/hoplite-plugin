@@ -2,8 +2,10 @@ package com.example.hoplite;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
@@ -25,6 +27,10 @@ public class Lobby {
     private BukkitTask countdownTask;
     private int timeLeft;
     private boolean activeGame = false;
+    private boolean gracePeriod = false;
+    private BukkitTask graceEndTask;
+    private BukkitTask compassTask;
+    private BukkitTask compassEnableTask;
     private BukkitTask borderTask;
 
     public Lobby(HoplitePlugin plugin, int id, String lobbyWorld, String gameWorld, int maxPlayers, int minPlayers) {
@@ -171,6 +177,32 @@ public class Lobby {
                 }
             }
 
+            gracePeriod = true;
+            Bukkit.broadcastMessage("Grace period has started for lobby " + id + " and will last 5 minutes.");
+            graceEndTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                gracePeriod = false;
+                for (UUID u : new HashSet<>(players)) {
+                    Player pl = Bukkit.getPlayer(u);
+                    if (pl != null && pl.isOnline()) {
+                        Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "msg " + pl.getName() + " Grace period is over! Fight now!");
+                    }
+                }
+            }, 5 * 60 * 20L);
+
+            compassEnableTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (!activeGame) return;
+                Bukkit.broadcastMessage("10 minutes have passed — everyone gets a tracking compass!");
+                for (UUID u : new HashSet<>(players)) {
+                    Player pl = Bukkit.getPlayer(u);
+                    if (pl != null && pl.isOnline()) {
+                        pl.getInventory().addItem(new ItemStack(Material.COMPASS));
+                    }
+                }
+                compassTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+                    updateCompassTargets();
+                }, 0L, 20L);
+            }, 10 * 60 * 20L);
+
             borderTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
                 World w = Bukkit.getWorld(gameWorld);
                 if (w == null) return;
@@ -193,6 +225,36 @@ public class Lobby {
     public synchronized void playerDied(UUID playerId) {
         players.remove(playerId);
         checkForWinner();
+    }
+
+    public synchronized boolean isGracePeriod() {
+        return gracePeriod;
+    }
+
+    private void updateCompassTargets() {
+        List<Player> livePlayers = new ArrayList<>();
+        for (UUID u : players) {
+            Player p = Bukkit.getPlayer(u);
+            if (p != null && p.isOnline() && p.getWorld().getName().equals(gameWorld)) {
+                livePlayers.add(p);
+            }
+        }
+        for (Player p : livePlayers) {
+            Player nearest = null;
+            double nearestDistance = Double.MAX_VALUE;
+            for (Player other : livePlayers) {
+                if (other.equals(p)) continue;
+                if (!other.getWorld().equals(p.getWorld())) continue;
+                double dist = p.getLocation().distanceSquared(other.getLocation());
+                if (dist < nearestDistance) {
+                    nearestDistance = dist;
+                    nearest = other;
+                }
+            }
+            if (nearest != null) {
+                p.setCompassTarget(nearest.getLocation());
+            }
+        }
     }
 
     public synchronized void recordKill(UUID killer) {
@@ -285,6 +347,18 @@ public class Lobby {
         if (borderTask != null) {
             borderTask.cancel();
             borderTask = null;
+        }
+        if (graceEndTask != null) {
+            graceEndTask.cancel();
+            graceEndTask = null;
+        }
+        if (compassEnableTask != null) {
+            compassEnableTask.cancel();
+            compassEnableTask = null;
+        }
+        if (compassTask != null) {
+            compassTask.cancel();
+            compassTask = null;
         }
 
         World lw = Bukkit.getWorld(lobbyWorld);

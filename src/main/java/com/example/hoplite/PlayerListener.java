@@ -71,6 +71,11 @@ public class PlayerListener implements Listener {
         Player victim = (Player) e.getEntity();
         for (Lobby l : plugin.getLobbies()) {
             if (l.hasPlayer(attacker.getUniqueId()) && l.hasPlayer(victim.getUniqueId())) {
+                if (l.isGracePeriod()) {
+                    e.setCancelled(true);
+                    attacker.sendMessage("§eGrace period is active. No PvP until it ends.");
+                    return;
+                }
                 if ("duos".equalsIgnoreCase(l.getMode())) {
                     java.util.UUID mate = l.getTeammate(attacker.getUniqueId());
                     if (mate != null && mate.equals(victim.getUniqueId())) {
