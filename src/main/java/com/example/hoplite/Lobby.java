@@ -5,11 +5,15 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.entity.Chicken;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
+import org.bukkit.util.Vector;
 
 import java.io.File;
 import java.util.*;
@@ -24,6 +28,7 @@ public class Lobby {
     private final String mode; // "singles" or "duos"
     private Map<UUID,UUID> teammates = new HashMap<>();
     private final Set<String> scoreboardTeamNames = new HashSet<>();
+    private final Map<UUID, ChickenDrop> chickenDrops = new HashMap<>();
 
     private final Set<UUID> players = new HashSet<>();
     private Set<UUID> participants = new HashSet<>(); 
@@ -32,11 +37,26 @@ public class Lobby {
     private int timeLeft;
     private boolean activeGame = false;
     private boolean teamsAnnounced = false;
+    private boolean partyMatch = false;
+    private final Set<UUID> privatePartyMembers = new HashSet<>();
     private boolean gracePeriod = false;
     private BukkitTask graceEndTask;
     private BukkitTask compassTask;
     private BukkitTask compassEnableTask;
     private BukkitTask borderTask;
+    private BukkitTask chickenDropTask;
+
+    private static final class ChickenDrop {
+        private final Chicken chicken;
+        private final Location target;
+        private boolean landing;
+        private boolean warned;
+
+        private ChickenDrop(Chicken chicken, Location target) {
+            this.chicken = chicken;
+            this.target = target;
+        }
+    }
 
     public Lobby(HoplitePlugin plugin, int id, String lobbyWorld, String gameWorld, int maxPlayers, int minPlayers) {
         this(plugin, id, lobbyWorld, gameWorld, maxPlayers, minPlayers, "singles");
@@ -63,12 +83,16 @@ public class Lobby {
     public String getMode() { return mode; }
     public synchronized UUID getTeammate(UUID player) { return teammates.get(player); }
 
-    public boolean isAvailableForSingles() {
-        return !activeGame && players.size() < maxPlayers && !"duos".equalsIgnoreCase(mode);
+    public synchronized boolean isAvailableForSingles() {
+        return !activeGame && !partyMatch && players.size() < maxPlayers && !"duos".equalsIgnoreCase(mode);
     }
 
-    public boolean isAvailableForDuos() {
-        return !activeGame && players.size() < maxPlayers && "duos".equalsIgnoreCase(mode);
+    public synchronized boolean isAvailableForDuos() {
+        return !activeGame && !partyMatch && players.size() < maxPlayers && "duos".equalsIgnoreCase(mode);
+    }
+
+    public synchronized boolean isAvailableForParty() {
+        return !activeGame && !partyMatch && players.isEmpty() && countdownTask == null;
     }
 
     public synchronized boolean hasPlayer(UUID uuid) {
@@ -86,7 +110,7 @@ public class Lobby {
     // --- LOBBY LOGIC ---
 
     public synchronized void addPlayer(Player p) {
-        if (activeGame) return;
+        if (activeGame || (partyMatch && !privatePartyMembers.contains(p.getUniqueId()))) return;
         if (players.size() >= maxPlayers) return;
         boolean refreshTeams = teamsAnnounced;
         players.add(p.getUniqueId());
@@ -98,9 +122,50 @@ public class Lobby {
         else if (refreshTeams && teamsAnnounced) assignDuosAndNotify();
     }
 
+    public synchronized boolean startPartyMatch(Collection<Player> partyPlayers) {
+        if (!isAvailableForParty() || partyPlayers.size() < 2 || partyPlayers.size() > maxPlayers) return false;
+        World waitingWorld = Bukkit.getWorld(lobbyWorld);
+        if (waitingWorld == null) return false;
+        for (Player player : partyPlayers) {
+            if (player == null || !player.isOnline()) return false;
+        }
+
+        partyMatch = true;
+        privatePartyMembers.clear();
+        for (Player player : partyPlayers) {
+            UUID playerId = player.getUniqueId();
+            privatePartyMembers.add(playerId);
+            players.add(playerId);
+            player.teleport(waitingWorld.getSpawnLocation());
+            player.sendMessage("§aYour party joined private lobby " + id + ".");
+        }
+        startFullLobbyCountdown();
+        return true;
+    }
+
     public synchronized void removePlayer(Player p) {
         if (players.remove(p.getUniqueId())) {
             Bukkit.broadcastMessage("§c" + p.getName() + " Left Queue " + players.size() + "/" + maxPlayers);
+        }
+        if (partyMatch && !activeGame) {
+            privatePartyMembers.remove(p.getUniqueId());
+            if (privatePartyMembers.size() < 2) {
+                cancelCountdown();
+                World waitingWorld = Bukkit.getWorld(lobbyWorld);
+                for (UUID member : new HashSet<>(privatePartyMembers)) {
+                    Player remaining = Bukkit.getPlayer(member);
+                    if (remaining != null && remaining.isOnline()) {
+                        if (!plugin.teleportToPlayerSpawn(remaining) && waitingWorld != null) {
+                            remaining.teleport(waitingWorld.getSpawnLocation());
+                        }
+                        remaining.sendMessage("§eThe party game was cancelled because too few members remained.");
+                    }
+                }
+                players.clear();
+                privatePartyMembers.clear();
+                partyMatch = false;
+                return;
+            }
         }
         if (!activeGame && players.size() < minPlayers) cancelCountdown();
         else if (!activeGame && teamsAnnounced) assignDuosAndNotify();
@@ -137,7 +202,14 @@ public class Lobby {
                 startGame();
             }
         }, 20L, 20L);
-        Bukkit.broadcastMessage("Lobby " + id + " is full — 10-second start");
+        if (partyMatch) {
+            for (UUID member : privatePartyMembers) {
+                Player player = Bukkit.getPlayer(member);
+                if (player != null) player.sendMessage("§eYour party game starts in 10 seconds.");
+            }
+        } else {
+            Bukkit.broadcastMessage("Lobby " + id + " is full — 10-second start");
+        }
         if ("duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
     }
 
@@ -171,7 +243,7 @@ public class Lobby {
             World gw = Bukkit.getWorld(gameWorld);
             if (gw == null) {
                 Bukkit.broadcastMessage("Failed to find created world: " + gameWorld);
-                activeGame = false;
+                endGame();
                 return;
             }
 
@@ -183,8 +255,7 @@ public class Lobby {
             for (UUID u : new HashSet<>(players)) {
                 Player pl = Bukkit.getPlayer(u);
                 if (pl != null && pl.isOnline()) {
-                    Location loc = randomLocationInWorld(gw, 500);
-                    pl.teleport(loc);
+                    beginChickenDrop(pl, gw);
                 }
             }
 
@@ -223,6 +294,144 @@ public class Lobby {
             }, 0L, 1200L);
 
         }, 200L);
+    }
+
+    private synchronized void beginChickenDrop(Player player, World world) {
+        Location target = findSafeLanding(world);
+        if (target == null) {
+            player.sendMessage("§cCould not find a safe landing spot. Please rejoin the match.");
+            return;
+        }
+
+        double angle = Math.random() * Math.PI * 2;
+        Location start = target.clone().add(Math.cos(angle) * 50, 130, Math.sin(angle) * 50);
+        Chicken chicken = world.spawn(start, Chicken.class);
+        chicken.setAI(false);
+        chicken.setInvulnerable(true);
+        chicken.setSilent(true);
+        player.setFallDistance(0);
+        player.teleport(start);
+        chicken.addPassenger(player);
+        chickenDrops.put(player.getUniqueId(), new ChickenDrop(chicken, target));
+        if (chickenDropTask == null) {
+            chickenDropTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickChickenDrops, 1L, 1L);
+        }
+    }
+
+    private Location findSafeLanding(World world) {
+        Random random = new Random();
+        for (int attempt = 0; attempt < 300; attempt++) {
+            int x = random.nextInt(761) - 380;
+            int z = random.nextInt(761) - 380;
+            Location location = safeSurfaceAt(world, x, z);
+            if (location != null) return location;
+        }
+        return null;
+    }
+
+    private Location safeSurfaceAt(World world, int x, int z) {
+        int y = world.getHighestBlockYAt(x, z);
+        Block ground = world.getBlockAt(x, y, z);
+        Material type = ground.getType();
+        if (!type.isSolid() || type == Material.WATER || type == Material.LAVA || type.name().endsWith("_LEAVES")
+                || type == Material.CACTUS || type == Material.MAGMA_BLOCK
+                || !ground.getRelative(0, 1, 0).isPassable()
+                || !ground.getRelative(0, 2, 0).isPassable()) {
+            return null;
+        }
+        return new Location(world, x + 0.5, y + 1, z + 0.5);
+    }
+
+    private synchronized void tickChickenDrops() {
+        Iterator<Map.Entry<UUID, ChickenDrop>> iterator = chickenDrops.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, ChickenDrop> entry = iterator.next();
+            Player player = Bukkit.getPlayer(entry.getKey());
+            ChickenDrop drop = entry.getValue();
+            if (player == null || !player.isOnline() || player.isDead() || !drop.chicken.isValid()) {
+                drop.landing = true;
+                if (drop.chicken.isValid()) drop.chicken.remove();
+                iterator.remove();
+                continue;
+            }
+
+            player.setFallDistance(0);
+            Location current = drop.chicken.getLocation();
+            double dx = drop.target.getX() - current.getX();
+            double dz = drop.target.getZ() - current.getZ();
+            double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
+
+            if (drop.chicken.isOnGround()) {
+                Location landing = safeSurfaceAt(current.getWorld(), current.getBlockX(), current.getBlockZ());
+                landChickenDrop(player, drop, landing == null ? drop.target : landing);
+                iterator.remove();
+                continue;
+            }
+            if (horizontalDistance <= 0.8 && current.getY() <= drop.target.getY() + 1.0) {
+                landChickenDrop(player, drop, drop.target);
+                iterator.remove();
+                continue;
+            }
+
+            Vector horizontal = new Vector(dx, 0, dz);
+            if (horizontalDistance > 0.8) horizontal.normalize().multiply(0.25);
+            double verticalSpeed = Math.max(-0.8, Math.min(-0.5,
+                    (drop.target.getY() - current.getY()) * 0.006));
+            drop.chicken.setVelocity(new Vector(horizontal.getX(), verticalSpeed, horizontal.getZ()));
+        }
+
+        if (chickenDrops.isEmpty() && chickenDropTask != null) {
+            chickenDropTask.cancel();
+            chickenDropTask = null;
+        }
+    }
+
+    private void landChickenDrop(Player player, ChickenDrop drop, Location landing) {
+        drop.landing = true;
+        drop.chicken.eject();
+        drop.chicken.remove();
+        player.teleport(landing);
+        player.setFallDistance(0);
+    }
+
+    public synchronized boolean preventChickenDismount(Player player, Entity vehicle) {
+        ChickenDrop drop = chickenDrops.get(player.getUniqueId());
+        if (drop == null || drop.landing || !drop.chicken.getUniqueId().equals(vehicle.getUniqueId())) return false;
+        if (!drop.warned) {
+            player.sendMessage("§eYou can't get off your chicken until it's on the ground.");
+            drop.warned = true;
+        }
+        return true;
+    }
+
+    public synchronized boolean isProtectedFromFall(UUID player) {
+        return chickenDrops.containsKey(player);
+    }
+
+    public synchronized void cancelChickenDrop(UUID playerId) {
+        ChickenDrop drop = chickenDrops.remove(playerId);
+        if (drop != null) {
+            drop.landing = true;
+            drop.chicken.eject();
+            drop.chicken.remove();
+        }
+        if (chickenDrops.isEmpty() && chickenDropTask != null) {
+            chickenDropTask.cancel();
+            chickenDropTask = null;
+        }
+    }
+
+    private synchronized void clearChickenDrops() {
+        for (ChickenDrop drop : chickenDrops.values()) {
+            drop.landing = true;
+            drop.chicken.eject();
+            drop.chicken.remove();
+        }
+        chickenDrops.clear();
+        if (chickenDropTask != null) {
+            chickenDropTask.cancel();
+            chickenDropTask = null;
+        }
     }
 
     private synchronized void assignDuosAndNotify() {
@@ -277,14 +486,6 @@ public class Lobby {
         scoreboardTeamNames.clear();
     }
 
-    private Location randomLocationInWorld(World w, int radius) {
-        Random r = new Random();
-        int x = r.nextInt(radius * 2) - radius;
-        int z = r.nextInt(radius * 2) - radius;
-        int y = w.getHighestBlockYAt(x, z) + 1;
-        return new Location(w, x + 0.5, y, z + 0.5);
-    }
-
     public synchronized void playerDied(UUID playerId) {
         players.remove(playerId);
         checkForWinner();
@@ -323,7 +524,7 @@ public class Lobby {
     public synchronized void recordKill(UUID killer) {
         killCount.put(killer, killCount.getOrDefault(killer, 0) + 1);
         Player k = Bukkit.getPlayer(killer);
-        if (k != null) {
+        if (k != null && !partyMatch) {
             plugin.addCoins(killer, 5);
         }
     }
@@ -352,7 +553,7 @@ public class Lobby {
             if (aliveTeams.size() <= 2) {
                 String winnerName = remaining.size() == 1 ? remaining.get(0).getName() : "No one";
                 Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
-                if (remaining.size() >= 1) {
+                if (!partyMatch && remaining.size() >= 1) {
                     // award both members if team exists
                     Player pwin = remaining.get(0);
                     UUID winUid = pwin.getUniqueId();
@@ -382,10 +583,10 @@ public class Lobby {
                 if (remaining.size() == 1) {
                     Player winner = remaining.get(0);
                     winner.sendTitle("§a§lYOU WON!", "", 10, 70, 20);
-                    plugin.addCoins(winner.getUniqueId(), 50);
+                    if (!partyMatch) plugin.addCoins(winner.getUniqueId(), 50);
                 }
                 Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
-                if (remaining.size() == 1) {
+                if (remaining.size() == 1 && !partyMatch) {
                     UUID winnerId = remaining.get(0).getUniqueId();
                     plugin.adjustEloAfterMatch(participants, winnerId);
                 }
@@ -402,11 +603,14 @@ public class Lobby {
         } else {
             cancelCountdown();
             players.clear();
+            privatePartyMembers.clear();
+            partyMatch = false;
         }
     }
 
     private synchronized void endGame() {
         activeGame = false;
+        clearChickenDrops();
         clearTeammateNameTags();
         if (borderTask != null) {
             borderTask.cancel();
@@ -439,6 +643,8 @@ public class Lobby {
         participants.clear();
         teammates.clear();
         teamsAnnounced = false;
+        privatePartyMembers.clear();
+        partyMatch = false;
 
         // 1. Remove from Multiverse (Bypasses confirmation code)
         Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "mv remove " + gameWorld);

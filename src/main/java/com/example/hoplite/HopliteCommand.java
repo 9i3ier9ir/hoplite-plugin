@@ -1,6 +1,7 @@
 package com.example.hoplite;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -12,6 +13,10 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.UUID;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class HopliteCommand implements CommandExecutor {
     private final HoplitePlugin plugin;
@@ -23,6 +28,10 @@ public class HopliteCommand implements CommandExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String cmd = command.getName().toLowerCase();
+        if (cmd.equals("broadcast")) {
+            handleBroadcast(sender, args);
+            return true;
+        }
         if (!(sender instanceof Player)) {
             sender.sendMessage("Only players can use this command.");
             return true;
@@ -42,6 +51,9 @@ public class HopliteCommand implements CommandExecutor {
                 return true;
             case "teamchat":
                 handleTeamChat(p, args);
+                return true;
+            case "party":
+                handleParty(p, args);
                 return true;
             case "elo":
                 int rating = plugin.getElo(p.getUniqueId());
@@ -65,6 +77,198 @@ public class HopliteCommand implements CommandExecutor {
                 return true;
         }
         return false;
+    }
+
+    private void handleBroadcast(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("hoplite.broadcast")) {
+            sender.sendMessage("§cYou do not have permission to broadcast.");
+            return;
+        }
+        if (args.length != 2) {
+            sender.sendMessage("§eUsage: /broadcast <link> <youtube|twitch>");
+            return;
+        }
+
+        String platform = args[1].equalsIgnoreCase("youtube") ? "YouTube"
+                : args[1].equalsIgnoreCase("twitch") ? "Twitch" : null;
+        if (platform == null || !isPlatformLink(args[0], platform)) {
+            sender.sendMessage("§cProvide a valid YouTube or Twitch link and matching platform.");
+            return;
+        }
+
+        String message = configuredMessage("broadcast", "&6[Live] &e%player% IS LIVE ON %platform%: &b%link%",
+                "%player%", sender.getName(), "%platform%", platform, "%link%", args[0]);
+        Bukkit.broadcastMessage(message);
+    }
+
+    private boolean isPlatformLink(String link, String platform) {
+        try {
+            URI uri = new URI(link);
+            if (!"http".equalsIgnoreCase(uri.getScheme())
+                    && !"https".equalsIgnoreCase(uri.getScheme())) return false;
+            String host = uri.getHost();
+            if (host == null) return false;
+            host = host.toLowerCase();
+            if (platform.equals("YouTube")) {
+                return host.equals("youtu.be") || host.equals("youtube.com")
+                        || host.endsWith(".youtube.com");
+            }
+            return host.equals("twitch.tv") || host.endsWith(".twitch.tv");
+        } catch (URISyntaxException ignored) {
+            return false;
+        }
+    }
+
+    private void handleParty(Player player, String[] args) {
+        if (args.length == 0) {
+            player.sendMessage("§eUsage: /party <create|invite|join|leave|disband|game|broadcast>");
+            return;
+        }
+
+        UUID playerId = player.getUniqueId();
+        switch (args[0].toLowerCase()) {
+            case "create":
+                if (!plugin.createParty(playerId)) {
+                    player.sendMessage("§cYou are already in a party.");
+                } else {
+                    player.sendMessage("§aParty created. Use /party invite <player> to invite members.");
+                }
+                return;
+            case "invite":
+                if (args.length != 2 || !plugin.isPartyOwner(playerId)) {
+                    player.sendMessage("§eOnly the party owner can use /party invite <player>.");
+                    return;
+                }
+                Player invitee = Bukkit.getPlayer(args[1]);
+                if (invitee == null) {
+                    player.sendMessage("§cThat player is not online.");
+                } else if (!plugin.invitePartyMember(playerId, invitee.getUniqueId())) {
+                    player.sendMessage("§cThat player is already in a party, or the party is unavailable.");
+                } else {
+                    player.sendMessage("§aInvited " + invitee.getName() + " to your party.");
+                    invitee.sendMessage("§e" + player.getName() + " invited you to a party. Use /party join "
+                            + player.getName() + " to join.");
+                }
+                return;
+            case "join":
+                if (args.length != 2) {
+                    player.sendMessage("§eUsage: /party join <owner>");
+                    return;
+                }
+                Player owner = Bukkit.getPlayer(args[1]);
+                if (owner == null || !plugin.joinParty(playerId, owner.getUniqueId())) {
+                    player.sendMessage("§cYou do not have a pending invite from that online player.");
+                } else {
+                    player.sendMessage("§aYou joined " + owner.getName() + "'s party.");
+                    owner.sendMessage("§a" + player.getName() + " joined your party.");
+                }
+                return;
+            case "leave":
+                UUID partyOwner = plugin.getPartyOwner(playerId);
+                if (partyOwner == null) {
+                    player.sendMessage("§cYou are not in a party.");
+                } else if (partyOwner.equals(playerId)) {
+                    player.sendMessage("§cYou own this party. Use /party disband instead.");
+                } else {
+                    plugin.leaveParty(playerId);
+                    player.sendMessage("§eYou left the party.");
+                    Player ownerPlayer = Bukkit.getPlayer(partyOwner);
+                    if (ownerPlayer != null) ownerPlayer.sendMessage("§e" + player.getName() + " left your party.");
+                }
+                return;
+            case "disband":
+                if (!plugin.isPartyOwner(playerId)) {
+                    player.sendMessage("§cOnly the party owner can disband the party.");
+                    return;
+                }
+                List<UUID> disbanded = plugin.disbandParty(playerId);
+                for (UUID member : disbanded) {
+                    Player onlineMember = Bukkit.getPlayer(member);
+                    if (onlineMember != null) onlineMember.sendMessage("§eThe party was disbanded.");
+                }
+                return;
+            case "game":
+                startPartyGame(player);
+                return;
+            case "broadcast":
+                broadcastParty(player);
+                return;
+            default:
+                player.sendMessage("§eUsage: /party <create|invite|join|leave|disband|game|broadcast>");
+        }
+    }
+
+    private void startPartyGame(Player owner) {
+        UUID ownerId = owner.getUniqueId();
+        if (!plugin.isPartyOwner(ownerId)) {
+            owner.sendMessage("§cOnly the party owner can start a party game.");
+            return;
+        }
+
+        List<UUID> memberIds = plugin.getPartyMembers(ownerId);
+        if (memberIds.size() < 2) {
+            owner.sendMessage("§cInvite at least one player before starting a party game.");
+            return;
+        }
+
+        List<Player> members = new ArrayList<>();
+        for (UUID memberId : memberIds) {
+            Player member = Bukkit.getPlayer(memberId);
+            if (member == null || !member.isOnline()) {
+                owner.sendMessage("§cAll party members must be online to start a game.");
+                return;
+            }
+            boolean alreadyQueued = plugin.getWaitingQueue().contains(memberId)
+                    || plugin.getWaitingQueueDuos().contains(memberId);
+            boolean alreadyInLobby = plugin.getLobbies().stream().anyMatch(lobby ->
+                    lobby.hasPlayer(memberId) || lobby.isParticipant(memberId));
+            if (alreadyQueued || alreadyInLobby) {
+                owner.sendMessage("§cAll party members must leave queues and matches first.");
+                return;
+            }
+            members.add(member);
+        }
+
+        Lobby lobby = plugin.getLobbies().stream()
+                .filter(candidate -> candidate.isAvailableForParty()
+                        && candidate.getMaxPlayers() >= members.size())
+                .findFirst().orElse(null);
+        if (lobby == null || !lobby.startPartyMatch(members)) {
+            owner.sendMessage("§cNo empty lobby can fit your party right now.");
+        }
+    }
+
+    private void broadcastParty(Player player) {
+        if (!player.hasPermission("hoplite.party.broadcast")) {
+            player.sendMessage("§cYou do not have permission to broadcast your party.");
+            return;
+        }
+        UUID ownerId = plugin.getPartyOwner(player.getUniqueId());
+        if (ownerId == null) {
+            player.sendMessage("§cYou are not in a party.");
+            return;
+        }
+
+        List<String> names = new ArrayList<>();
+        for (UUID member : plugin.getPartyMembers(player.getUniqueId())) {
+            String name = Bukkit.getOfflinePlayer(member).getName();
+            names.add(name == null ? member.toString() : name);
+        }
+        String ownerName = Bukkit.getOfflinePlayer(ownerId).getName();
+        String message = configuredMessage("party-broadcast",
+                "&d[Party] &e%owner%'s party members: &f%members%",
+                "%owner%", ownerName == null ? ownerId.toString() : ownerName,
+                "%members%", String.join(", ", names));
+        Bukkit.broadcastMessage(message);
+    }
+
+    private String configuredMessage(String key, String fallback, String... replacements) {
+        String message = ChatColor.translateAlternateColorCodes('&',
+                plugin.getConfig().getString("messages." + key, fallback));
+        for (int i = 0; i + 1 < replacements.length; i += 2) {
+            message = message.replace(replacements[i], replacements[i + 1]);
+        }
+        return message;
     }
 
     private void handleQueue(Player p, String[] args) {
