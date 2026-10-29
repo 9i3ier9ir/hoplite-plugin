@@ -36,6 +36,13 @@ public class HopliteCommand implements CommandExecutor {
             case "leaveq":
                 handleLeaveQ(p);
                 return true;
+            case "hoplitesetspawn":
+                plugin.setPlayerSpawn(p.getLocation());
+                p.sendMessage("§aHoplite spawn set to your current location.");
+                return true;
+            case "teamchat":
+                handleTeamChat(p, args);
+                return true;
             case "elo":
                 int rating = plugin.getElo(p.getUniqueId());
                 p.sendMessage("Your ELO: " + rating);
@@ -164,6 +171,28 @@ public class HopliteCommand implements CommandExecutor {
         }
     }
 
+    private void handleTeamChat(Player p, String[] args) {
+        if (args.length != 1 || !args[0].equalsIgnoreCase("ingame")) {
+            p.sendMessage("§eUsage: /teamchat ingame");
+            return;
+        }
+
+        UUID playerId = p.getUniqueId();
+        boolean inDuoGame = plugin.getLobbies().stream().anyMatch(lobby ->
+                lobby.isActiveGame()
+                        && "duos".equalsIgnoreCase(lobby.getMode())
+                        && lobby.isParticipant(playerId));
+        if (!inDuoGame) {
+            p.sendMessage("§cTeam chat is only available during a duos match.");
+            return;
+        }
+
+        boolean enabled = plugin.toggleTeamChat(playerId);
+        p.sendMessage(enabled
+                ? "§aTeam chat enabled. Use /teamchat ingame again to disable it."
+                : "§eTeam chat disabled.");
+    }
+
     private void openKitMenu(Player p) {
         // Check if player is in an active game
         for (Lobby l : plugin.getLobbies()) {
@@ -215,6 +244,8 @@ public class HopliteCommand implements CommandExecutor {
         
         if (!found) {
             p.sendMessage("§cYou are not in any queue.");
+        } else {
+            plugin.teleportToPlayerSpawn(p);
         }
     }
 

@@ -7,6 +7,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -14,6 +15,8 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.block.Block;
 import org.bukkit.Material;
+
+import java.util.UUID;
 
 
 public class PlayerListener implements Listener {
@@ -31,6 +34,7 @@ public class PlayerListener implements Listener {
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent e) {
         Player p = e.getPlayer();
+        plugin.disableTeamChat(p.getUniqueId());
         // Remove from any lobby
         for (Lobby l : plugin.getLobbies()) {
             if (l.hasPlayer(p.getUniqueId())) l.removePlayer(p);
@@ -43,6 +47,8 @@ public class PlayerListener implements Listener {
     @EventHandler
     public void onPlayerCommand(PlayerCommandPreprocessEvent e) {
         Player p = e.getPlayer();
+        String rootCommand = e.getMessage().split("\\s+", 2)[0];
+        if (rootCommand.equalsIgnoreCase("/teamchat")) return;
         // If player is in any active game, block commands
         for (Lobby l : plugin.getLobbies()) {
             if (l.isActiveGame() && l.hasPlayer(p.getUniqueId())) {
@@ -51,6 +57,26 @@ public class PlayerListener implements Listener {
                 return;
             }
         }
+    }
+
+    @EventHandler
+    public void onPlayerChat(AsyncPlayerChatEvent e) {
+        Player sender = e.getPlayer();
+        UUID senderId = sender.getUniqueId();
+        if (!plugin.isTeamChatEnabled(senderId)) return;
+
+        for (Lobby lobby : plugin.getLobbies()) {
+            if (!lobby.isActiveGame()
+                    || !"duos".equalsIgnoreCase(lobby.getMode())
+                    || !lobby.isParticipant(senderId)) continue;
+
+            UUID teammate = lobby.getTeammate(senderId);
+            e.getRecipients().removeIf(recipient ->
+                    !recipient.getUniqueId().equals(senderId)
+                            && (teammate == null || !recipient.getUniqueId().equals(teammate)));
+            return;
+        }
+        plugin.disableTeamChat(senderId);
     }
 
     @EventHandler

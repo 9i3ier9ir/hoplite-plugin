@@ -1,12 +1,15 @@
 package com.example.hoplite;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 
 import java.io.File;
 import java.util.*;
@@ -20,6 +23,7 @@ public class Lobby {
     private final int minPlayers;
     private final String mode; // "singles" or "duos"
     private Map<UUID,UUID> teammates = new HashMap<>();
+    private final Set<String> scoreboardTeamNames = new HashSet<>();
 
     private final Set<UUID> players = new HashSet<>();
     private Set<UUID> participants = new HashSet<>(); 
@@ -27,6 +31,7 @@ public class Lobby {
     private BukkitTask countdownTask;
     private int timeLeft;
     private boolean activeGame = false;
+    private boolean teamsAnnounced = false;
     private boolean gracePeriod = false;
     private BukkitTask graceEndTask;
     private BukkitTask compassTask;
@@ -56,7 +61,7 @@ public class Lobby {
     public int getPlayerCount() { return players.size(); }
 
     public String getMode() { return mode; }
-    public UUID getTeammate(UUID player) { return teammates.get(player); }
+    public synchronized UUID getTeammate(UUID player) { return teammates.get(player); }
 
     public boolean isAvailableForSingles() {
         return !activeGame && players.size() < maxPlayers && !"duos".equalsIgnoreCase(mode);
@@ -66,12 +71,16 @@ public class Lobby {
         return !activeGame && players.size() < maxPlayers && "duos".equalsIgnoreCase(mode);
     }
 
-    public boolean hasPlayer(UUID uuid) {
+    public synchronized boolean hasPlayer(UUID uuid) {
         return players.contains(uuid);
     }
 
-    public boolean isActiveGame() {
+    public synchronized boolean isActiveGame() {
         return activeGame;
+    }
+
+    public synchronized boolean isParticipant(UUID uuid) {
+        return participants.contains(uuid);
     }
 
     // --- LOBBY LOGIC ---
@@ -79,12 +88,14 @@ public class Lobby {
     public synchronized void addPlayer(Player p) {
         if (activeGame) return;
         if (players.size() >= maxPlayers) return;
+        boolean refreshTeams = teamsAnnounced;
         players.add(p.getUniqueId());
         p.sendMessage("§aJoined lobby " + id + " (" + players.size() + "/" + maxPlayers + ")");
          Bukkit.broadcastMessage("§a" + p.getName() + " Joined Queue " + players.size() + "/" + maxPlayers);
 
         if (players.size() >= minPlayers) startCountdownIfNeeded();
         if (players.size() == maxPlayers) startFullLobbyCountdown();
+        else if (refreshTeams && teamsAnnounced) assignDuosAndNotify();
     }
 
     public synchronized void removePlayer(Player p) {
@@ -92,16 +103,20 @@ public class Lobby {
             Bukkit.broadcastMessage("§c" + p.getName() + " Left Queue " + players.size() + "/" + maxPlayers);
         }
         if (!activeGame && players.size() < minPlayers) cancelCountdown();
+        else if (!activeGame && teamsAnnounced) assignDuosAndNotify();
         if (activeGame) checkForWinner();
     }
 
     private synchronized void startCountdownIfNeeded() {
         if (countdownTask != null) return;
         timeLeft = 60;
+        teamsAnnounced = false;
+        teammates.clear();
         countdownTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             timeLeft--;
             if (timeLeft == 30) Bukkit.broadcastMessage("30-second warning");
             if (timeLeft == 10) Bukkit.broadcastMessage("10-second warning");
+            if (timeLeft == 10 && "duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
             if (timeLeft <= 0) {
                 countdownTask.cancel();
                 countdownTask = null;
@@ -123,6 +138,7 @@ public class Lobby {
             }
         }, 20L, 20L);
         Bukkit.broadcastMessage("Lobby " + id + " is full — 10-second start");
+        if ("duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
     }
 
     private synchronized void cancelCountdown() {
@@ -131,26 +147,21 @@ public class Lobby {
             countdownTask = null;
             Bukkit.broadcastMessage("Lobby " + id + " countdown cancelled (not enough players)");
         }
+        teamsAnnounced = false;
+        teammates.clear();
     }
 
     // --- GAME LOGIC ---
 
     private synchronized void startGame() {
         if (activeGame) return;
+        if ("duos".equalsIgnoreCase(mode) && !teamsAnnounced) assignDuosAndNotify();
         activeGame = true;
         participants = new HashSet<>(players);
         Bukkit.broadcastMessage("Starting game for lobby " + id);
 
-        // when duos mode, pair teammates arbitrarily
         if ("duos".equalsIgnoreCase(mode)) {
-            List<UUID> list = new ArrayList<>(participants);
-            teammates.clear();
-            for (int i = 0; i + 1 < list.size(); i += 2) {
-                UUID a = list.get(i);
-                UUID b = list.get(i+1);
-                teammates.put(a, b);
-                teammates.put(b, a);
-            }
+            applyTeammateNameTags();
         }
 
         String cmd = "mv create " + gameWorld + " normal -g TerraformGenerator";
@@ -212,6 +223,58 @@ public class Lobby {
             }, 0L, 1200L);
 
         }, 200L);
+    }
+
+    private synchronized void assignDuosAndNotify() {
+        if (!"duos".equalsIgnoreCase(mode)) return;
+        teammates.clear();
+        List<UUID> list = new ArrayList<>(players);
+        for (int i = 0; i + 1 < list.size(); i += 2) {
+            UUID first = list.get(i);
+            UUID second = list.get(i + 1);
+            teammates.put(first, second);
+            teammates.put(second, first);
+
+            Player firstPlayer = Bukkit.getPlayer(first);
+            Player secondPlayer = Bukkit.getPlayer(second);
+            if (firstPlayer != null && secondPlayer != null) {
+                firstPlayer.sendMessage("§aYour teammate is " + secondPlayer.getName() + "!");
+                secondPlayer.sendMessage("§aYour teammate is " + firstPlayer.getName() + "!");
+            }
+        }
+        teamsAnnounced = true;
+    }
+
+    private void applyTeammateNameTags() {
+        Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+        Set<UUID> assigned = new HashSet<>();
+        int teamNumber = 1;
+        for (Map.Entry<UUID, UUID> entry : teammates.entrySet()) {
+            UUID first = entry.getKey();
+            UUID second = entry.getValue();
+            if (!assigned.add(first) || !assigned.add(second)) continue;
+
+            String teamName = "hp" + id + "t" + teamNumber++;
+            Team existing = scoreboard.getTeam(teamName);
+            if (existing != null) existing.unregister();
+            Team team = scoreboard.registerNewTeam(teamName);
+            team.setColor(ChatColor.GREEN);
+            team.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.ALWAYS);
+            Player firstPlayer = Bukkit.getPlayer(first);
+            Player secondPlayer = Bukkit.getPlayer(second);
+            if (firstPlayer != null) team.addEntry(firstPlayer.getName());
+            if (secondPlayer != null) team.addEntry(secondPlayer.getName());
+            scoreboardTeamNames.add(teamName);
+        }
+    }
+
+    private void clearTeammateNameTags() {
+        Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+        for (String teamName : scoreboardTeamNames) {
+            Team team = scoreboard.getTeam(teamName);
+            if (team != null) team.unregister();
+        }
+        scoreboardTeamNames.clear();
     }
 
     private Location randomLocationInWorld(World w, int radius) {
@@ -344,6 +407,7 @@ public class Lobby {
 
     private synchronized void endGame() {
         activeGame = false;
+        clearTeammateNameTags();
         if (borderTask != null) {
             borderTask.cancel();
             borderTask = null;
@@ -362,13 +426,19 @@ public class Lobby {
         }
 
         World lw = Bukkit.getWorld(lobbyWorld);
-        for (UUID u : new HashSet<>(players)) {
+        for (UUID u : new HashSet<>(participants)) {
+            plugin.disableTeamChat(u);
             Player p = Bukkit.getPlayer(u);
             if (p != null && p.isOnline()) {
-                if (lw != null) p.teleport(lw.getSpawnLocation());
+                if (!plugin.teleportToPlayerSpawn(p) && lw != null) {
+                    p.teleport(lw.getSpawnLocation());
+                }
             }
         }
         players.clear();
+        participants.clear();
+        teammates.clear();
+        teamsAnnounced = false;
 
         // 1. Remove from Multiverse (Bypasses confirmation code)
         Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "mv remove " + gameWorld);
