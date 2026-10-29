@@ -1,8 +1,10 @@
 package com.example.hoplite;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.HashMap;
@@ -13,6 +15,7 @@ import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.io.File;
 import org.bukkit.configuration.file.YamlConfiguration;
 import java.io.IOException;
@@ -28,6 +31,7 @@ public class HoplitePlugin extends JavaPlugin {
     private final Queue<UUID> waitingQueueDuos = new LinkedList<>();
     private final Map<UUID,Integer> elo = new HashMap<>();
     private final Map<UUID,Long> coins = new HashMap<>();
+    private final Set<UUID> teamChatEnabled = ConcurrentHashMap.newKeySet();
     private File eloFile;
     private File coinsFile;
     private YamlConfiguration eloYaml;
@@ -73,7 +77,9 @@ public class HoplitePlugin extends JavaPlugin {
         if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
             try {
                 new PlaceholderHook(this).register();
-                getLogger().info("Registered PlaceholderAPI expansion (hoplite_elo, hoplite_coins, hoplite_inqueue).");
+                new PlaceholderHook(this, "cleader").register();
+                new PlaceholderHook(this, "eloleader").register();
+                getLogger().info("Registered PlaceholderAPI expansions.");
             } catch (NoClassDefFoundError e) {
                 getLogger().warning("PlaceholderAPI present but expansion failed to register (build without PAPI?).");
             }
@@ -90,11 +96,9 @@ public class HoplitePlugin extends JavaPlugin {
         getCommand("coingive").setExecutor(executor);
         getCommand("k").setExecutor(executor);
         getCommand("leaveq").setExecutor(executor);
+        getCommand("teamchat").setExecutor(executor);
 
-        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            new PlaceholderHook(this).register();
-            getLogger().info("Registered PlaceholderAPI expansion.");
-        } else {
+        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") == null) {
             getLogger().info("PlaceholderAPI not found; skipping PlaceholderAPI expansion.");
         }
 
@@ -128,6 +132,55 @@ public class HoplitePlugin extends JavaPlugin {
 
     public java.util.Collection<Lobby> getLobbies() {
         return lobbies.values();
+    }
+
+    public void setPlayerSpawn(Location location) {
+        getConfig().set("spawn.world", location.getWorld().getName());
+        getConfig().set("spawn.x", location.getX());
+        getConfig().set("spawn.y", location.getY());
+        getConfig().set("spawn.z", location.getZ());
+        getConfig().set("spawn.yaw", location.getYaw());
+        getConfig().set("spawn.pitch", location.getPitch());
+        saveConfig();
+    }
+
+    public Location getPlayerSpawn() {
+        String worldName = getConfig().getString("spawn.world");
+        if (worldName == null) return null;
+        World world = Bukkit.getWorld(worldName);
+        if (world == null) {
+            File worldFolder = new File(Bukkit.getWorldContainer(), worldName);
+            if (!worldFolder.isDirectory()) return null;
+            world = new WorldCreator(worldName).createWorld();
+        }
+        if (world == null) return null;
+        return new Location(world,
+                getConfig().getDouble("spawn.x"),
+                getConfig().getDouble("spawn.y"),
+                getConfig().getDouble("spawn.z"),
+                (float) getConfig().getDouble("spawn.yaw"),
+                (float) getConfig().getDouble("spawn.pitch"));
+    }
+
+    public boolean teleportToPlayerSpawn(Player player) {
+        Location spawn = getPlayerSpawn();
+        if (spawn == null) return false;
+        player.teleport(spawn);
+        return true;
+    }
+
+    public boolean toggleTeamChat(UUID player) {
+        if (teamChatEnabled.remove(player)) return false;
+        teamChatEnabled.add(player);
+        return true;
+    }
+
+    public boolean isTeamChatEnabled(UUID player) {
+        return teamChatEnabled.contains(player);
+    }
+
+    public void disableTeamChat(UUID player) {
+        teamChatEnabled.remove(player);
     }
 
     // ELO management
@@ -185,6 +238,16 @@ public class HoplitePlugin extends JavaPlugin {
             sender.sendMessage(rank + ". " + name + " - " + e.getValue());
             rank++;
         }
+    }
+
+    public String getEloLeaderboardEntry(int rank) {
+        if (rank < 1 || rank > 10) return "";
+        List<Map.Entry<UUID,Integer>> list = new ArrayList<>(elo.entrySet());
+        list.sort((a,b) -> b.getValue().compareTo(a.getValue()));
+        if (rank > list.size()) return "";
+        Map.Entry<UUID,Integer> entry = list.get(rank - 1);
+        String name = Bukkit.getOfflinePlayer(entry.getKey()).getName();
+        return (name == null ? "Unknown" : name) + " - " + entry.getValue();
     }
 
     private void addCustomRecipes() {
@@ -274,5 +337,15 @@ public class HoplitePlugin extends JavaPlugin {
             sender.sendMessage(rank + ". " + name + " - " + e.getValue() + " coins");
             rank++;
         }
+    }
+
+    public String getCoinLeaderboardEntry(int rank) {
+        if (rank < 1 || rank > 10) return "";
+        List<Map.Entry<UUID,Long>> list = new ArrayList<>(coins.entrySet());
+        list.sort((a,b) -> b.getValue().compareTo(a.getValue()));
+        if (rank > list.size()) return "";
+        Map.Entry<UUID,Long> entry = list.get(rank - 1);
+        String name = Bukkit.getOfflinePlayer(entry.getKey()).getName();
+        return (name == null ? "Unknown" : name) + " - " + entry.getValue() + " coins";
     }
 }

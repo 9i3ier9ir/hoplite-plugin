@@ -5,9 +5,15 @@ import org.bukkit.entity.Player;
 
 public class PlaceholderHook extends PlaceholderExpansion {
     private final HoplitePlugin plugin;
+    private final String identifier;
 
     public PlaceholderHook(HoplitePlugin plugin) {
+        this(plugin, "hoplite");
+    }
+
+    public PlaceholderHook(HoplitePlugin plugin, String identifier) {
         this.plugin = plugin;
+        this.identifier = identifier;
     }
 
     @Override
@@ -22,7 +28,7 @@ public class PlaceholderHook extends PlaceholderExpansion {
 
     @Override
     public String getIdentifier() {
-        return "hoplite";
+        return identifier;
     }
 
     @Override
@@ -37,6 +43,12 @@ public class PlaceholderHook extends PlaceholderExpansion {
 
     @Override
     public String onPlaceholderRequest(Player player, String identifier) {
+        if (this.identifier.equals("cleader")) {
+            return plugin.getCoinLeaderboardEntry(parseRank(identifier));
+        }
+        if (this.identifier.equals("eloleader")) {
+            return plugin.getEloLeaderboardEntry(parseRank(identifier));
+        }
         if (player == null) return "";
         switch (identifier.toLowerCase()) {
             case "elo":
@@ -58,6 +70,15 @@ public class PlaceholderHook extends PlaceholderExpansion {
                 return String.valueOf(inGame);
             default:
                 return "";
+        }
+    }
+
+    private int parseRank(String identifier) {
+        try {
+            int rank = Integer.parseInt(identifier);
+            return rank >= 1 && rank <= 10 ? rank : -1;
+        } catch (NumberFormatException ignored) {
+            return -1;
         }
     }
 }

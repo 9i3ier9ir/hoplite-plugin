@@ -11,6 +11,10 @@ commands:
     description: "Alias for /queue"
   leaveq:
     description: "Leave the current queue or lobby"
+  hoplitesetspawn:
+    description: "Set the spawn location used when leaving a queue or match"
+  teamchat:
+    description: "Toggle private duo team chat during a match"
   elo:
     description: "See your current ELO rating"
   eloleader:
