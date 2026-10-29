@@ -8,6 +8,8 @@ import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.spigotmc.event.entity.EntityDismountEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -35,6 +37,7 @@ public class PlayerListener implements Listener {
     public void onPlayerQuit(PlayerQuitEvent e) {
         Player p = e.getPlayer();
         plugin.disableTeamChat(p.getUniqueId());
+        for (Lobby l : plugin.getLobbies()) l.cancelChickenDrop(p.getUniqueId());
         // Remove from any lobby
         for (Lobby l : plugin.getLobbies()) {
             if (l.hasPlayer(p.getUniqueId())) l.removePlayer(p);
@@ -45,10 +48,39 @@ public class PlayerListener implements Listener {
     }
 
     @EventHandler
+    public void onEntityDismount(EntityDismountEvent e) {
+        if (!(e.getEntity() instanceof Player)) return;
+        Player player = (Player) e.getEntity();
+        for (Lobby lobby : plugin.getLobbies()) {
+            if (lobby.preventChickenDismount(player, e.getDismounted())) {
+                e.setCancelled(true);
+                return;
+            }
+        }
+    }
+
+    @EventHandler
+    public void onFallDamage(EntityDamageEvent e) {
+        if (!(e.getEntity() instanceof Player) || e.getCause() != EntityDamageEvent.DamageCause.FALL) return;
+        Player player = (Player) e.getEntity();
+        for (Lobby lobby : plugin.getLobbies()) {
+            if (lobby.isProtectedFromFall(player.getUniqueId())) {
+                e.setCancelled(true);
+                player.setFallDistance(0);
+                return;
+            }
+        }
+    }
+
+    @EventHandler
     public void onPlayerCommand(PlayerCommandPreprocessEvent e) {
         Player p = e.getPlayer();
         String rootCommand = e.getMessage().split("\\s+", 2)[0];
         if (rootCommand.equalsIgnoreCase("/teamchat")) return;
+        if (rootCommand.equalsIgnoreCase("/broadcast")) return;
+        String[] commandParts = e.getMessage().split("\\s+", 3);
+        if (commandParts.length > 1 && commandParts[0].equalsIgnoreCase("/party")
+            && commandParts[1].equalsIgnoreCase("broadcast")) return;
         // If player is in any active game, block commands
         for (Lobby l : plugin.getLobbies()) {
             if (l.isActiveGame() && l.hasPlayer(p.getUniqueId())) {

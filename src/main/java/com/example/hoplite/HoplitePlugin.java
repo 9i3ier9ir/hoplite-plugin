@@ -15,6 +15,7 @@ import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.io.File;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -32,6 +33,9 @@ public class HoplitePlugin extends JavaPlugin {
     private final Map<UUID,Integer> elo = new HashMap<>();
     private final Map<UUID,Long> coins = new HashMap<>();
     private final Set<UUID> teamChatEnabled = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, Set<UUID>> parties = new HashMap<>();
+    private final Map<UUID, UUID> partyOwnerByMember = new HashMap<>();
+    private final Map<UUID, UUID> partyInvitations = new HashMap<>();
     private File eloFile;
     private File coinsFile;
     private YamlConfiguration eloYaml;
@@ -97,6 +101,9 @@ public class HoplitePlugin extends JavaPlugin {
         getCommand("k").setExecutor(executor);
         getCommand("leaveq").setExecutor(executor);
         getCommand("teamchat").setExecutor(executor);
+        getCommand("hoplitesetspawn").setExecutor(executor);
+        getCommand("broadcast").setExecutor(executor);
+        getCommand("party").setExecutor(executor);
 
         if (getServer().getPluginManager().getPlugin("PlaceholderAPI") == null) {
             getLogger().info("PlaceholderAPI not found; skipping PlaceholderAPI expansion.");
@@ -181,6 +188,63 @@ public class HoplitePlugin extends JavaPlugin {
 
     public void disableTeamChat(UUID player) {
         teamChatEnabled.remove(player);
+    }
+
+    public synchronized boolean createParty(UUID owner) {
+        if (partyOwnerByMember.containsKey(owner)) return false;
+        Set<UUID> members = new LinkedHashSet<>();
+        members.add(owner);
+        parties.put(owner, members);
+        partyOwnerByMember.put(owner, owner);
+        return true;
+    }
+
+    public synchronized UUID getPartyOwner(UUID player) {
+        return partyOwnerByMember.get(player);
+    }
+
+    public synchronized List<UUID> getPartyMembers(UUID player) {
+        UUID owner = partyOwnerByMember.get(player);
+        Set<UUID> members = owner == null ? null : parties.get(owner);
+        return members == null ? new ArrayList<>() : new ArrayList<>(members);
+    }
+
+    public synchronized boolean isPartyOwner(UUID player) {
+        return parties.containsKey(player);
+    }
+
+    public synchronized boolean invitePartyMember(UUID owner, UUID invitee) {
+        if (!parties.containsKey(owner) || partyOwnerByMember.containsKey(invitee)) return false;
+        partyInvitations.put(invitee, owner);
+        return true;
+    }
+
+    public synchronized boolean joinParty(UUID player, UUID owner) {
+        if (partyOwnerByMember.containsKey(player)
+                || !parties.containsKey(owner)
+                || !owner.equals(partyInvitations.get(player))) return false;
+        parties.get(owner).add(player);
+        partyOwnerByMember.put(player, owner);
+        partyInvitations.remove(player);
+        return true;
+    }
+
+    public synchronized boolean leaveParty(UUID player) {
+        UUID owner = partyOwnerByMember.get(player);
+        if (owner == null || owner.equals(player)) return false;
+        Set<UUID> members = parties.get(owner);
+        if (members != null) members.remove(player);
+        partyOwnerByMember.remove(player);
+        return true;
+    }
+
+    public synchronized List<UUID> disbandParty(UUID owner) {
+        Set<UUID> members = parties.remove(owner);
+        if (members == null) return new ArrayList<>();
+        List<UUID> disbandedMembers = new ArrayList<>(members);
+        for (UUID member : disbandedMembers) partyOwnerByMember.remove(member);
+        partyInvitations.entrySet().removeIf(invitation -> owner.equals(invitation.getValue()));
+        return disbandedMembers;
     }
 
     // ELO management

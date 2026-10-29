@@ -55,3 +55,8 @@ duos:
   maxPlayersPerLobby: 20
   teamSize: 2
   friendlyFire: false
+
+# Broadcast templates. Supported placeholders: %player%, %platform%, %link%, %owner%, %members%.
+messages:
+  broadcast: "&6[Live] &e%player% IS LIVE ON %platform%: &b%link%"
+  party-broadcast: "&d[Party] &e%owner%'s party members: &f%members%"

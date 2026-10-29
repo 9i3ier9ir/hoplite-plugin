@@ -15,6 +15,11 @@ commands:
     description: "Set the spawn location used when leaving a queue or match"
   teamchat:
     description: "Toggle private duo team chat during a match"
+  broadcast:
+    description: "Announce that a player is live on YouTube or Twitch"
+    permission: hoplite.broadcast
+  party:
+    description: "Create and manage a party"
   elo:
     description: "See your current ELO rating"
   eloleader:
@@ -27,3 +32,10 @@ commands:
     description: "Give coins to another player"
   k:
     description: "Open the kits menu to purchase kits"
+permissions:
+  hoplite.broadcast:
+    description: "Broadcast a live stream announcement"
+    default: op
+  hoplite.party.broadcast:
+    description: "Broadcast a party announcement"
+    default: op
