@@ -59,6 +59,13 @@ public class PlayerListener implements Listener {
             Method isBackward = inputClass.getMethod("isBackward");
             Method isLeft = inputClass.getMethod("isLeft");
             Method isRight = inputClass.getMethod("isRight");
+            Method isSneak;
+            try {
+                isSneak = inputClass.getMethod("isSneak");
+            } catch (NoSuchMethodException exception) {
+                isSneak = inputClass.getMethod("isSneaking");
+            }
+            final Method sneakInputMethod = isSneak;
             EventExecutor executor = (listener, event) -> {
                 try {
                     Player player = (Player) getPlayer.invoke(event);
@@ -67,8 +74,10 @@ public class PlayerListener implements Listener {
                     boolean backward = (boolean) isBackward.invoke(input);
                     boolean left = (boolean) isLeft.invoke(input);
                     boolean right = (boolean) isRight.invoke(input);
+                    boolean fastDrop = (boolean) sneakInputMethod.invoke(input);
                     for (Lobby lobby : plugin.getLobbies()) {
-                        lobby.updateChickenDropInput(player.getUniqueId(), forward, backward, left, right);
+                        lobby.updateChickenDropInput(player.getUniqueId(), forward, backward, left, right,
+                                fastDrop);
                     }
                 } catch (ReflectiveOperationException exception) {
                     plugin.getLogger().warning("Could not read Paper player input: " + exception.getMessage());

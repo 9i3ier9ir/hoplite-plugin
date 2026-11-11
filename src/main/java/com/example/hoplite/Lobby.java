@@ -55,6 +55,7 @@ public class Lobby {
         private boolean backward;
         private boolean left;
         private boolean right;
+        private boolean fastDrop;
 
         private ChickenDrop(Chicken chicken, Location target) {
             this.chicken = chicken;
@@ -392,6 +393,7 @@ public class Lobby {
             }
             double verticalSpeed = Math.max(-0.8, Math.min(-0.5,
                     (drop.target.getY() - current.getY()) * 0.006));
+                if (drop.fastDrop) verticalSpeed *= 2;
             drop.chicken.setVelocity(new Vector(horizontal.getX(), verticalSpeed, horizontal.getZ()));
         }
 
@@ -420,13 +422,14 @@ public class Lobby {
     }
 
     public synchronized void updateChickenDropInput(UUID playerId, boolean forward, boolean backward,
-                                                     boolean left, boolean right) {
+                                                     boolean left, boolean right, boolean fastDrop) {
         ChickenDrop drop = chickenDrops.get(playerId);
         if (drop == null) return;
         drop.forward = forward;
         drop.backward = backward;
         drop.left = left;
         drop.right = right;
+        drop.fastDrop = fastDrop;
     }
 
     public synchronized boolean isProtectedFromFall(UUID player) {
