@@ -15,16 +15,81 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.Event;
+import org.bukkit.event.EventPriority;
 import org.bukkit.block.Block;
 import org.bukkit.Material;
+import org.bukkit.plugin.EventExecutor;
 
+import java.lang.reflect.Method;
 import java.util.UUID;
 
 
 public class PlayerListener implements Listener {
     private final HoplitePlugin plugin;
 
-    public PlayerListener(HoplitePlugin plugin) { this.plugin = plugin; }
+    public PlayerListener(HoplitePlugin plugin) {
+        this.plugin = plugin;
+        registerPlayerInputEvent();
+    }
+
+    private void registerPlayerInputEvent() {
+        Class<? extends Event> inputEventClass = null;
+        for (String className : new String[]{
+                "io.papermc.paper.event.player.PlayerInputEvent",
+                "com.destroystokyo.paper.event.player.PlayerInputEvent",
+                "org.bukkit.event.player.PlayerInputEvent"
+        }) {
+            try {
+                inputEventClass = Class.forName(className).asSubclass(Event.class);
+                break;
+            } catch (ClassNotFoundException ignored) {
+            }
+        }
+        if (inputEventClass == null) {
+            plugin.getLogger().warning("PlayerInputEvent is unavailable; chicken drop steering is disabled.");
+            return;
+        }
+
+        try {
+            Method getInput = inputEventClass.getMethod("getInput");
+            Method getPlayer = inputEventClass.getMethod("getPlayer");
+            Class<?> inputClass = getInput.getReturnType();
+            Method isForward = inputClass.getMethod("isForward");
+            Method isBackward = inputClass.getMethod("isBackward");
+            Method isLeft = inputClass.getMethod("isLeft");
+            Method isRight = inputClass.getMethod("isRight");
+            Method isSneak;
+            try {
+                isSneak = inputClass.getMethod("isSneak");
+            } catch (NoSuchMethodException exception) {
+                isSneak = inputClass.getMethod("isSneaking");
+            }
+            final Method sneakInputMethod = isSneak;
+            EventExecutor executor = (listener, event) -> {
+                try {
+                    Player player = (Player) getPlayer.invoke(event);
+                    Object input = getInput.invoke(event);
+                    boolean forward = (boolean) isForward.invoke(input);
+                    boolean backward = (boolean) isBackward.invoke(input);
+                    boolean left = (boolean) isLeft.invoke(input);
+                    boolean right = (boolean) isRight.invoke(input);
+                    boolean fastDrop = (boolean) sneakInputMethod.invoke(input);
+                    for (Lobby lobby : plugin.getLobbies()) {
+                        lobby.updateChickenDropInput(player.getUniqueId(), forward, backward, left, right,
+                                fastDrop);
+                    }
+                } catch (ReflectiveOperationException exception) {
+                    plugin.getLogger().warning("Could not read Paper player input: " + exception.getMessage());
+                }
+            };
+            plugin.getServer().getPluginManager().registerEvent(
+                    inputEventClass, this, EventPriority.NORMAL, executor, plugin);
+        } catch (ReflectiveOperationException exception) {
+            plugin.getLogger().warning("Could not register Paper player input for chicken steering: "
+                    + exception.getMessage());
+        }
+    }
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent e) {
