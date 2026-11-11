@@ -51,6 +51,10 @@ public class Lobby {
         private final Location target;
         private boolean landing;
         private boolean warned;
+        private boolean forward;
+        private boolean backward;
+        private boolean left;
+        private boolean right;
 
         private ChickenDrop(Chicken chicken, Location target) {
             this.chicken = chicken;
@@ -373,8 +377,19 @@ public class Lobby {
                 continue;
             }
 
-            Vector horizontal = new Vector(dx, 0, dz);
-            if (horizontalDistance > 0.8) horizontal.normalize().multiply(0.25);
+            Vector horizontal;
+            double forwardInput = (drop.forward ? 1 : 0) - (drop.backward ? 1 : 0);
+            double sidewaysInput = (drop.left ? 1 : 0) - (drop.right ? 1 : 0);
+            if (forwardInput != 0 || sidewaysInput != 0) {
+                double yaw = Math.toRadians(player.getLocation().getYaw());
+                horizontal = new Vector(
+                        -Math.sin(yaw) * forwardInput + Math.cos(yaw) * sidewaysInput,
+                        0,
+                        Math.cos(yaw) * forwardInput + Math.sin(yaw) * sidewaysInput);
+                horizontal.normalize().multiply(0.35);
+            } else {
+                horizontal = new Vector(0, 0, 0);
+            }
             double verticalSpeed = Math.max(-0.8, Math.min(-0.5,
                     (drop.target.getY() - current.getY()) * 0.006));
             drop.chicken.setVelocity(new Vector(horizontal.getX(), verticalSpeed, horizontal.getZ()));
@@ -402,6 +417,16 @@ public class Lobby {
             drop.warned = true;
         }
         return true;
+    }
+
+    public synchronized void updateChickenDropInput(UUID playerId, boolean forward, boolean backward,
+                                                     boolean left, boolean right) {
+        ChickenDrop drop = chickenDrops.get(playerId);
+        if (drop == null) return;
+        drop.forward = forward;
+        drop.backward = backward;
+        drop.left = left;
+        drop.right = right;
     }
 
     public synchronized boolean isProtectedFromFall(UUID player) {
