@@ -149,7 +149,10 @@ public class Lobby {
     }
 
     public synchronized void removePlayer(Player p) {
-        if (players.remove(p.getUniqueId())) {
+        UUID playerId = p.getUniqueId();
+        participants.remove(playerId);
+        privatePartyMembers.remove(playerId);
+        if (players.remove(playerId)) {
             Bukkit.broadcastMessage("§c" + p.getName() + " Left Queue " + players.size() + "/" + maxPlayers);
         }
         if (partyMatch && !activeGame) {
@@ -241,15 +244,37 @@ public class Lobby {
             applyTeammateNameTags();
         }
 
+        for (UUID u : new HashSet<>(players)) {
+            Player player = Bukkit.getPlayer(u);
+            if (player != null && player.isOnline()) {
+                player.sendTitle("§c§lWORLD LOADING", "§7Preparing the match world...", 10, 100, 10);
+            }
+        }
+
         String cmd = "mv create " + gameWorld + " normal -g TerraformGenerator";
         Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), cmd);
 
+        pollForGeneratedWorld(0);
+    }
+
+    private void pollForGeneratedWorld(int elapsedTicks) {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             World gw = Bukkit.getWorld(gameWorld);
             if (gw == null) {
-                Bukkit.broadcastMessage("Failed to find created world: " + gameWorld);
-                endGame();
+                if (elapsedTicks < 200) {
+                    pollForGeneratedWorld(elapsedTicks + 10);
+                } else {
+                    Bukkit.broadcastMessage("Failed to find created world: " + gameWorld);
+                    endGame();
+                }
                 return;
+            }
+
+            for (UUID u : new HashSet<>(players)) {
+                Player player = Bukkit.getPlayer(u);
+                if (player != null && player.isOnline()) {
+                    player.sendTitle("§a§lWORLD GENERATED", "§fTeleporting now", 10, 60, 10);
+                }
             }
 
             gw.getWorldBorder().setCenter(0, 0);
@@ -298,7 +323,7 @@ public class Lobby {
                 w.getWorldBorder().setSize(next);
             }, 0L, 1200L);
 
-        }, 200L);
+        }, 10L);
     }
 
     private synchronized void beginChickenDrop(Player player, World world) {
