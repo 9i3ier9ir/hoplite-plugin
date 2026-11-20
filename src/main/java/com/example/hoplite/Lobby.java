@@ -285,6 +285,7 @@ public class Lobby {
             for (UUID u : new HashSet<>(players)) {
                 Player pl = Bukkit.getPlayer(u);
                 if (pl != null && pl.isOnline()) {
+                    plugin.grantPendingKit(pl);
                     beginChickenDrop(pl, gw);
                 }
             }
