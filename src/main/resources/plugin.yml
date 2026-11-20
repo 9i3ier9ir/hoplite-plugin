@@ -20,6 +20,9 @@ commands:
     permission: hoplite.broadcast
   party:
     description: "Create and manage a party"
+  hoplitereload:
+    description: "Reload Hoplite configuration"
+    permission: hoplite.reload
   elo:
     description: "See your current ELO rating"
   eloleader:
@@ -33,6 +36,12 @@ commands:
   k:
     description: "Open the kits menu to purchase kits"
 permissions:
+  hoplite.reload:
+    description: "Reload Hoplite configuration"
+    default: op
+  hoplite.command.bypass:
+    description: "Bypass Hoplite allowed-command restrictions"
+    default: op
   hoplite.broadcast:
     description: "Broadcast a live stream announcement"
     default: op

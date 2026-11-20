@@ -104,6 +104,7 @@ public class HoplitePlugin extends JavaPlugin {
         getCommand("hoplitesetspawn").setExecutor(executor);
         getCommand("broadcast").setExecutor(executor);
         getCommand("party").setExecutor(executor);
+        getCommand("hoplitereload").setExecutor(executor);
 
         if (getServer().getPluginManager().getPlugin("PlaceholderAPI") == null) {
             getLogger().info("PlaceholderAPI not found; skipping PlaceholderAPI expansion.");
@@ -119,6 +120,61 @@ public class HoplitePlugin extends JavaPlugin {
     public void onDisable() {
         getLogger().info("HoplitePlugin disabling...");
         lobbies.values().forEach(Lobby::forceReset);
+    }
+
+    public void reloadAllConfigs() {
+        for (Lobby lobby : new ArrayList<>(lobbies.values())) {
+            lobby.forceReset();
+        }
+        lobbies.clear();
+        waitingQueue.clear();
+        waitingQueueDuos.clear();
+
+        reloadConfig();
+        setupDataFiles();
+        loadElo();
+        loadCoins();
+
+        int id = 1;
+        for (Map<?, ?> entry : getConfig().getMapList("lobbies")) {
+            String lobbyWorld = (String) entry.get("lobbyWorld");
+            String gameWorld = (String) entry.get("gameWorld");
+            int max = entry.containsKey("maxPlayers")
+                    ? ((Number) entry.get("maxPlayers")).intValue() : 10;
+            int min = entry.containsKey("minPlayers")
+                    ? ((Number) entry.get("minPlayers")).intValue() : 5;
+            String mode = entry.containsKey("mode") ? (String) entry.get("mode") : "singles";
+
+            World world = Bukkit.getWorld(lobbyWorld);
+            if (world == null) {
+                world = new WorldCreator(lobbyWorld).createWorld();
+            }
+            if (world == null) {
+                getLogger().severe("Configured lobby world missing: " + lobbyWorld + " — check your config.");
+                continue;
+            }
+            Lobby lobby = new Lobby(this, id++, lobbyWorld, gameWorld, max, min, mode);
+            lobbies.put(lobby.getId(), lobby);
+        }
+        getLogger().info("Hoplite configuration reloaded.");
+    }
+
+    public boolean isCommandAllowed(String state, String command) {
+        String normalizedState = state.toLowerCase(java.util.Locale.ROOT);
+        String normalizedCommand = command.toLowerCase(java.util.Locale.ROOT);
+        List<String> allowed = getConfig().getStringList("allowed-commands." + normalizedState);
+        if (allowed.isEmpty()) {
+            allowed = getConfig().getStringList("allowed_commands." + normalizedState);
+        }
+        if (allowed.isEmpty()) {
+            allowed = getConfig().getStringList("commands." + normalizedState);
+        }
+        for (String entry : allowed) {
+            String allowedCommand = entry == null ? "" : entry.trim().toLowerCase(java.util.Locale.ROOT);
+            if (allowedCommand.startsWith("/")) allowedCommand = allowedCommand.substring(1);
+            if (allowedCommand.equals(normalizedCommand)) return true;
+        }
+        return false;
     }
 
     public Lobby getLobbyByWorld(String worldName) {

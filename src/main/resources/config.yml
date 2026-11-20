@@ -47,6 +47,17 @@ lobbies:
     maxPlayers: 10
     minPlayers: 5
 
+# Commands players may use while in each Hoplite state.
+# Add command names without the leading slash.
+allowed-commands:
+  lobby:
+    - leaveq
+    - party
+  queue:
+    - leaveq
+  game:
+    - teamchat
+
 # elo values are stored automatically under the "elo" section
 
 # Duos configuration - optional. Set per-lobby mode by adding `mode: duos` to a lobby entry.
