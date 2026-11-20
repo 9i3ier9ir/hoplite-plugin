@@ -14,6 +14,7 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.LinkedHashSet;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,10 +37,14 @@ public class HoplitePlugin extends JavaPlugin {
     private final Map<UUID, Set<UUID>> parties = new HashMap<>();
     private final Map<UUID, UUID> partyOwnerByMember = new HashMap<>();
     private final Map<UUID, UUID> partyInvitations = new HashMap<>();
+    private final Map<UUID, Set<String>> ownedKits = new HashMap<>();
+    private final Map<UUID, String> pendingKits = new HashMap<>();
     private File eloFile;
     private File coinsFile;
+    private File kitsFile;
     private YamlConfiguration eloYaml;
     private YamlConfiguration coinsYaml;
+    private YamlConfiguration kitsYaml;
 
     @Override
     public void onEnable() {
@@ -49,6 +54,7 @@ public class HoplitePlugin extends JavaPlugin {
         setupDataFiles();
         loadElo();
         loadCoins();
+        loadKits();
 
         // Build lobby list from configuration
         lobbies.clear();
@@ -134,6 +140,7 @@ public class HoplitePlugin extends JavaPlugin {
         setupDataFiles();
         loadElo();
         loadCoins();
+        loadKits();
 
         int id = 1;
         for (Map<?, ?> entry : getConfig().getMapList("lobbies")) {
@@ -438,12 +445,68 @@ public class HoplitePlugin extends JavaPlugin {
         if (!getDataFolder().exists()) getDataFolder().mkdirs();
         eloFile = new File(getDataFolder(), "elo.yml");
         coinsFile = new File(getDataFolder(), "coins.yml");
+        kitsFile = new File(getDataFolder(), "kits.yml");
         try {
             if (!eloFile.exists()) eloFile.createNewFile();
             if (!coinsFile.exists()) coinsFile.createNewFile();
+            if (!kitsFile.exists()) kitsFile.createNewFile();
         } catch (IOException ignored) {}
         eloYaml = YamlConfiguration.loadConfiguration(eloFile);
         coinsYaml = YamlConfiguration.loadConfiguration(coinsFile);
+        kitsYaml = YamlConfiguration.loadConfiguration(kitsFile);
+    }
+
+    private void loadKits() {
+        ownedKits.clear();
+        if (kitsYaml == null || !kitsYaml.contains("owned")) return;
+        for (String key : kitsYaml.getConfigurationSection("owned").getKeys(false)) {
+            try {
+                UUID playerId = UUID.fromString(key);
+                ownedKits.put(playerId,
+                        new HashSet<>(kitsYaml.getStringList("owned." + key)));
+            } catch (IllegalArgumentException ignored) {}
+        }
+    }
+
+    public boolean ownsKit(UUID player, String kitName) {
+        Set<String> kits = ownedKits.get(player);
+        return kits != null && kits.contains(kitName);
+    }
+
+    public boolean purchaseKit(UUID player, String kitName, long price) {
+        if (ownsKit(player, kitName)) return false;
+        if (!removeCoins(player, price)) return false;
+        ownedKits.computeIfAbsent(player, id -> new HashSet<>()).add(kitName);
+        saveOwnedKits();
+        return true;
+    }
+
+    public void loadKitForNextGame(UUID player, String kitName) {
+        pendingKits.put(player, kitName);
+    }
+
+    public void clearPendingKit(UUID player) {
+        pendingKits.remove(player);
+    }
+
+    public void grantPendingKit(Player player) {
+        String kitName = pendingKits.remove(player.getUniqueId());
+        if (kitName == null) return;
+        for (KitData.Kit kit : KitData.KITS) {
+            if (kit.name.equals(kitName) && ownsKit(player.getUniqueId(), kitName)) {
+                kit.grantToPlayer(player);
+                return;
+            }
+        }
+    }
+
+    private void saveOwnedKits() {
+        if (kitsYaml == null) return;
+        kitsYaml.set("owned", null);
+        for (Map.Entry<UUID, Set<String>> entry : ownedKits.entrySet()) {
+            kitsYaml.set("owned." + entry.getKey(), new ArrayList<>(entry.getValue()));
+        }
+        try { kitsYaml.save(kitsFile); } catch (IOException ignored) {}
     }
 
     public void sendCoinLeaderboard(org.bukkit.command.CommandSender sender) {

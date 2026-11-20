@@ -102,6 +102,7 @@ public class PlayerListener implements Listener {
     public void onPlayerQuit(PlayerQuitEvent e) {
         Player p = e.getPlayer();
         plugin.disableTeamChat(p.getUniqueId());
+        plugin.clearPendingKit(p.getUniqueId());
         for (Lobby l : plugin.getLobbies()) l.cancelChickenDrop(p.getUniqueId());
         // Remove from any lobby
         for (Lobby l : plugin.getLobbies()) {
@@ -233,10 +234,12 @@ public class PlayerListener implements Listener {
             if (slot >= 0 && slot < KitData.KITS.size()) {
                 KitData.Kit kit = KitData.KITS.get(slot);
                 if (e.isLeftClick()) {
-                    // Buy kit
-                    if (plugin.removeCoins(p.getUniqueId(), kit.price)) {
-                        kit.grantToPlayer(p);
-                        p.sendMessage("§aKit '" + kit.name + "' purchased!");
+                    if (plugin.ownsKit(p.getUniqueId(), kit.name)) {
+                        plugin.loadKitForNextGame(p.getUniqueId(), kit.name);
+                        p.sendMessage("§aKit loaded for next game: " + kit.name);
+                        p.closeInventory();
+                    } else if (plugin.purchaseKit(p.getUniqueId(), kit.name, kit.price)) {
+                        p.sendMessage("§aPermanently purchased kit '" + kit.name + "'!");
                         p.closeInventory();
                     } else {
                         p.sendMessage("§cYou don't have enough coins. Need: " + kit.price);

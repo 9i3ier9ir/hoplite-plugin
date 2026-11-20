@@ -427,7 +427,12 @@ public class HopliteCommand implements CommandExecutor {
             ItemMeta meta = is.getItemMeta();
             meta.setDisplayName("§6" + kit.name);
             java.util.List<String> lore = new java.util.ArrayList<>();
-            lore.add("§eCost: §6" + kit.price + " coins");
+            if (plugin.ownsKit(p.getUniqueId(), kit.name)) {
+                lore.add("§aOwned - left-click to load");
+            } else {
+                lore.add("§eCost: §6" + kit.price + " coins");
+                lore.add("§7Left-click to buy permanently");
+            }
             lore.add("§7Right-click to preview");
             meta.setLore(lore);
             is.setItemMeta(meta);
