@@ -310,19 +310,20 @@ public class HopliteCommand implements CommandExecutor {
                 .max(Comparator.comparingInt(Lobby::getPlayerCount))
                 .orElse(null);
         if (fullestLobby != null) {
-            World lobbyWorld = Bukkit.getWorld(fullestLobby.getLobbyWorld());
-            if (lobbyWorld == null) {
-                lobbyWorld = new org.bukkit.WorldCreator(fullestLobby.getLobbyWorld()).createWorld();
+            if (fullestLobby.addPlayer(p)) {
+                World lobbyWorld = Bukkit.getWorld(fullestLobby.getLobbyWorld());
+                if (lobbyWorld == null) {
+                    lobbyWorld = new org.bukkit.WorldCreator(fullestLobby.getLobbyWorld()).createWorld();
+                }
+                if (lobbyWorld != null) {
+                    p.teleport(lobbyWorld.getSpawnLocation());
+                }
+                p.sendMessage("You have joined lobby " + fullestLobby.getId() + ".");
+                return;
             }
-            if (lobbyWorld != null) {
-                p.teleport(lobbyWorld.getSpawnLocation());
-            }
-            fullestLobby.addPlayer(p);
-            p.sendMessage("You have joined lobby " + fullestLobby.getId() + ".");
-            return;
         }
         // all busy/full
-        plugin.getWaitingQueue().add(id);
+        if (!plugin.getWaitingQueue().contains(id)) plugin.getWaitingQueue().add(id);
         p.sendMessage("All lobbies are currently full or active. You've been placed in the global queue.");
     }
 
@@ -345,19 +346,20 @@ public class HopliteCommand implements CommandExecutor {
                 .max(Comparator.comparingInt(Lobby::getPlayerCount))
                 .orElse(null);
         if (fullestLobby != null) {
-            World lobbyWorld = Bukkit.getWorld(fullestLobby.getLobbyWorld());
-            if (lobbyWorld == null) {
-                lobbyWorld = new org.bukkit.WorldCreator(fullestLobby.getLobbyWorld()).createWorld();
+            if (fullestLobby.addPlayer(p)) {
+                World lobbyWorld = Bukkit.getWorld(fullestLobby.getLobbyWorld());
+                if (lobbyWorld == null) {
+                    lobbyWorld = new org.bukkit.WorldCreator(fullestLobby.getLobbyWorld()).createWorld();
+                }
+                if (lobbyWorld != null) {
+                    p.teleport(lobbyWorld.getSpawnLocation());
+                }
+                p.sendMessage("You have joined duo lobby " + fullestLobby.getId() + ".");
+                return;
             }
-            if (lobbyWorld != null) {
-                p.teleport(lobbyWorld.getSpawnLocation());
-            }
-            fullestLobby.addPlayer(p);
-            p.sendMessage("You have joined duo lobby " + fullestLobby.getId() + ".");
-            return;
         }
 
-        plugin.getWaitingQueueDuos().add(id);
+        if (!plugin.getWaitingQueueDuos().contains(id)) plugin.getWaitingQueueDuos().add(id);
         p.sendMessage("All duo lobbies are currently full or active. You've been placed in the duo global queue.");
     }
 
@@ -445,13 +447,12 @@ public class HopliteCommand implements CommandExecutor {
         UUID id = p.getUniqueId();
         boolean found = false;
         
-        // Check lobbies
+        // Clear all tracked memberships, including stale duplicate queue entries.
         for (Lobby l : plugin.getLobbies()) {
             if (l.hasPlayer(id) || l.isParticipant(id)) {
                 l.removePlayer(p);
                 p.sendMessage("§cYou left the queue.");
                 found = true;
-                break;
             }
         }
         
