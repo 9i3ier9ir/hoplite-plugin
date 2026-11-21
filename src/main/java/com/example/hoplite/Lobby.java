@@ -44,6 +44,9 @@ public class Lobby {
     private BukkitTask compassEnableTask;
     private BukkitTask borderTask;
     private BukkitTask chickenDropTask;
+    private BukkitTask winnerExitTask;
+    private BukkitTask worldDeleteTask;
+    private final Map<UUID, Integer> winnerReturnTicks = new HashMap<>();
 
     private static final class ChickenDrop {
         private final Chicken chicken;
@@ -113,6 +116,15 @@ public class Lobby {
 
     // --- LOBBY LOGIC ---
 
+    private synchronized void sendLobbyMessage(String message) {
+        for (UUID playerId : new HashSet<>(players)) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline()) {
+                player.sendMessage(message);
+            }
+        }
+    }
+
     public synchronized boolean addPlayer(Player p) {
         UUID playerId = p.getUniqueId();
         if (players.contains(playerId)) return true;
@@ -121,7 +133,7 @@ public class Lobby {
         boolean refreshTeams = teamsAnnounced;
         players.add(playerId);
         p.sendMessage("§aJoined lobby " + id + " (" + players.size() + "/" + maxPlayers + ")");
-         Bukkit.broadcastMessage("§a" + p.getName() + " Joined Queue " + players.size() + "/" + maxPlayers);
+        sendLobbyMessage("§a" + p.getName() + " joined your lobby (" + players.size() + "/" + maxPlayers + ")");
 
         if (players.size() >= minPlayers) startCountdownIfNeeded();
         if (players.size() == maxPlayers) startFullLobbyCountdown();
@@ -155,7 +167,7 @@ public class Lobby {
         participants.remove(playerId);
         privatePartyMembers.remove(playerId);
         if (players.remove(playerId)) {
-            Bukkit.broadcastMessage("§c" + p.getName() + " Left Queue " + players.size() + "/" + maxPlayers);
+            sendLobbyMessage("§c" + p.getName() + " left your lobby (" + players.size() + "/" + maxPlayers + ")");
         }
         if (partyMatch && !activeGame) {
             privatePartyMembers.remove(p.getUniqueId());
@@ -189,8 +201,8 @@ public class Lobby {
         teammates.clear();
         countdownTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             timeLeft--;
-            if (timeLeft == 30) Bukkit.broadcastMessage("30-second warning");
-            if (timeLeft == 10) Bukkit.broadcastMessage("10-second warning");
+            if (timeLeft == 30) sendLobbyMessage("§e30 seconds until the game starts.");
+            if (timeLeft == 10) sendLobbyMessage("§e10 seconds until the game starts.");
             if (timeLeft == 10 && "duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
             if (timeLeft <= 0) {
                 countdownTask.cancel();
@@ -198,7 +210,7 @@ public class Lobby {
                 startGame();
             }
         }, 20L, 20L);
-        Bukkit.broadcastMessage("Lobby " + id + " countdown started: 60 seconds");
+        sendLobbyMessage("§eYour lobby countdown started: 60 seconds.");
     }
 
     private synchronized void startFullLobbyCountdown() {
@@ -218,7 +230,7 @@ public class Lobby {
                 if (player != null) player.sendMessage("§eYour party game starts in 10 seconds.");
             }
         } else {
-            Bukkit.broadcastMessage("Lobby " + id + " is full — 10-second start");
+            sendLobbyMessage("§eYour lobby is full. The game starts in 10 seconds.");
         }
         if ("duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
     }
@@ -227,7 +239,7 @@ public class Lobby {
         if (countdownTask != null) {
             countdownTask.cancel();
             countdownTask = null;
-            Bukkit.broadcastMessage("Lobby " + id + " countdown cancelled (not enough players)");
+            sendLobbyMessage("§cThe countdown was cancelled because there are not enough players.");
         }
         teamsAnnounced = false;
         teammates.clear();
@@ -240,7 +252,7 @@ public class Lobby {
         if ("duos".equalsIgnoreCase(mode) && !teamsAnnounced) assignDuosAndNotify();
         activeGame = true;
         participants = new HashSet<>(players);
-        Bukkit.broadcastMessage("Starting game for lobby " + id);
+        sendLobbyMessage("§aYour game is starting.");
 
         if ("duos".equalsIgnoreCase(mode)) {
             applyTeammateNameTags();
@@ -266,7 +278,7 @@ public class Lobby {
                 if (elapsedTicks < 200) {
                     pollForGeneratedWorld(elapsedTicks + 10);
                 } else {
-                    Bukkit.broadcastMessage("Failed to find created world: " + gameWorld);
+                    sendLobbyMessage("§cFailed to create the game world. Please try again later.");
                     endGame();
                 }
                 return;
@@ -293,20 +305,20 @@ public class Lobby {
             }
 
             gracePeriod = true;
-            Bukkit.broadcastMessage("Grace period has started for lobby " + id + " and will last 5 minutes.");
+            sendLobbyMessage("§eGrace period has started and will last 5 minutes.");
             graceEndTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 gracePeriod = false;
                 for (UUID u : new HashSet<>(players)) {
                     Player pl = Bukkit.getPlayer(u);
                     if (pl != null && pl.isOnline()) {
-                        Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "msg " + pl.getName() + " Grace period is over! Fight now!");
+                        pl.sendMessage("§eGrace period is over! Fight now!");
                     }
                 }
             }, 5 * 60 * 20L);
 
             compassEnableTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 if (!activeGame) return;
-                Bukkit.broadcastMessage("10 minutes have passed — everyone gets a tracking compass!");
+                sendLobbyMessage("§e10 minutes have passed. Everyone gets a tracking compass!");
                 for (UUID u : new HashSet<>(players)) {
                     Player pl = Bukkit.getPlayer(u);
                     if (pl != null && pl.isOnline()) {
@@ -607,8 +619,11 @@ public class Lobby {
             }
             // If zero or one team/player remains, end
             if (aliveTeams.size() <= 2) {
-                String winnerName = remaining.size() == 1 ? remaining.get(0).getName() : "No one";
-                Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
+                Set<UUID> winnerIds = new HashSet<>();
+                for (Player winner : remaining) winnerIds.add(winner.getUniqueId());
+                String winnerName = remaining.isEmpty() ? "No one" : remaining.stream()
+                    .map(Player::getName).collect(java.util.stream.Collectors.joining(", "));
+                sendLobbyMessage("§6Game finished. Winner: " + winnerName);
                 if (!partyMatch && remaining.size() >= 1) {
                     // award both members if team exists
                     Player pwin = remaining.get(0);
@@ -631,22 +646,23 @@ public class Lobby {
                         }
                     }
                 }
-                endGame();
+                endGame(winnerIds);
             }
         } else {
             if (remaining.size() <= 1) {
                 String winnerName = remaining.size() == 1 ? remaining.get(0).getName() : "No one";
+                Set<UUID> winnerIds = new HashSet<>();
                 if (remaining.size() == 1) {
                     Player winner = remaining.get(0);
-                    winner.sendTitle("§a§lYOU WON!", "", 10, 70, 20);
+                    winnerIds.add(winner.getUniqueId());
                     if (!partyMatch) plugin.addCoins(winner.getUniqueId(), 50);
                 }
-                Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
+                sendLobbyMessage("§6Game finished. Winner: " + winnerName);
                 if (remaining.size() == 1 && !partyMatch) {
                     UUID winnerId = remaining.get(0).getUniqueId();
                     plugin.adjustEloAfterMatch(participants, winnerId);
                 }
-                endGame();
+                endGame(winnerIds);
             }
         }
     }
@@ -665,6 +681,10 @@ public class Lobby {
     }
 
     private synchronized void endGame() {
+        endGame(Collections.emptySet());
+    }
+
+    private synchronized void endGame(Set<UUID> winners) {
         activeGame = false;
         clearChickenDrops();
         clearTeammateNameTags();
@@ -688,11 +708,13 @@ public class Lobby {
         World lw = Bukkit.getWorld(lobbyWorld);
         for (UUID u : new HashSet<>(participants)) {
             plugin.disableTeamChat(u);
+            if (winners.contains(u)) continue;
             Player p = Bukkit.getPlayer(u);
             if (p != null && p.isOnline()) {
                 if (!plugin.teleportToPlayerSpawn(p) && lw != null) {
                     p.teleport(lw.getSpawnLocation());
                 }
+                clearPlayerInventory(p);
             }
         }
         players.clear();
@@ -702,8 +724,87 @@ public class Lobby {
         privatePartyMembers.clear();
         partyMatch = false;
 
-        Bukkit.getServer().dispatchCommand(
-                Bukkit.getConsoleSender(), "mv delete " + gameWorld + " -f");
-        Bukkit.getLogger().info("[Hoplite] Sent forced Multiverse deletion for game world: " + gameWorld);
+        if (winners.isEmpty()) {
+            deleteWorldWhenEmpty();
+        } else {
+            beginWinnerExit(winners);
+        }
+    }
+
+    private synchronized void beginWinnerExit(Set<UUID> winners) {
+        winnerReturnTicks.clear();
+        for (UUID winner : winners) winnerReturnTicks.put(winner, 0);
+        if (winnerExitTask != null) winnerExitTask.cancel();
+
+        winnerExitTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            synchronized (Lobby.this) {
+                World game = Bukkit.getWorld(gameWorld);
+                for (UUID winnerId : new HashSet<>(winnerReturnTicks.keySet())) {
+                    Player winner = Bukkit.getPlayer(winnerId);
+                    if (winner == null || !winner.isOnline() || game == null || winner.getWorld() != game) {
+                        if (winner != null && winner.isOnline()) {
+                            winner.clearTitle();
+                            clearPlayerInventory(winner);
+                        }
+                        winnerReturnTicks.remove(winnerId);
+                        continue;
+                    }
+
+                    int elapsedTicks = winnerReturnTicks.get(winnerId);
+                    if (elapsedTicks % 20 == 0) {
+                        winner.sendTitle("§a§lYOU WON!", "§eReturning to spawn...", 0, 40, 0);
+                    }
+                    if (elapsedTicks >= 100) {
+                        Location spawn = plugin.getPlayerSpawn();
+                        boolean teleported = spawn != null
+                                && !gameWorld.equals(spawn.getWorld().getName())
+                                && winner.teleport(spawn);
+                        if (!teleported && lwExistsOutsideGame()) {
+                            World waitingWorld = Bukkit.getWorld(lobbyWorld);
+                            teleported = waitingWorld != null
+                                    && winner.teleport(waitingWorld.getSpawnLocation());
+                        }
+                        if (teleported && winner.getWorld() != game) {
+                            winner.clearTitle();
+                            clearPlayerInventory(winner);
+                            winnerReturnTicks.remove(winnerId);
+                        }
+                    } else {
+                        winnerReturnTicks.put(winnerId, elapsedTicks + 5);
+                    }
+                }
+
+                if (winnerReturnTicks.isEmpty()) {
+                    winnerExitTask.cancel();
+                    winnerExitTask = null;
+                    deleteWorldWhenEmpty();
+                }
+            }
+        }, 0L, 5L);
+    }
+
+    private boolean lwExistsOutsideGame() {
+        World waitingWorld = Bukkit.getWorld(lobbyWorld);
+        return waitingWorld != null && !lobbyWorld.equals(gameWorld);
+    }
+
+    private void clearPlayerInventory(Player player) {
+        player.getInventory().clear();
+        player.getInventory().setArmorContents(new ItemStack[4]);
+        player.getInventory().setItemInOffHand(null);
+    }
+
+    private synchronized void deleteWorldWhenEmpty() {
+        if (worldDeleteTask != null) worldDeleteTask.cancel();
+        worldDeleteTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            World world = Bukkit.getWorld(gameWorld);
+            if (world != null && !world.getPlayers().isEmpty()) return;
+
+            worldDeleteTask.cancel();
+            worldDeleteTask = null;
+            Bukkit.getServer().dispatchCommand(
+                    Bukkit.getConsoleSender(), "mv delete " + gameWorld + " -f");
+            Bukkit.getLogger().info("[Hoplite] Sent forced Multiverse deletion for game world: " + gameWorld);
+        }, 1L, 20L);
     }
 }
