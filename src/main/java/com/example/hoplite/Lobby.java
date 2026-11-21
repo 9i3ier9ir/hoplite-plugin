@@ -113,6 +113,15 @@ public class Lobby {
 
     // --- LOBBY LOGIC ---
 
+    private synchronized void sendLobbyMessage(String message) {
+        for (UUID playerId : new HashSet<>(players)) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline()) {
+                player.sendMessage(message);
+            }
+        }
+    }
+
     public synchronized boolean addPlayer(Player p) {
         UUID playerId = p.getUniqueId();
         if (players.contains(playerId)) return true;
@@ -121,7 +130,7 @@ public class Lobby {
         boolean refreshTeams = teamsAnnounced;
         players.add(playerId);
         p.sendMessage("§aJoined lobby " + id + " (" + players.size() + "/" + maxPlayers + ")");
-         Bukkit.broadcastMessage("§a" + p.getName() + " Joined Queue " + players.size() + "/" + maxPlayers);
+        sendLobbyMessage("§a" + p.getName() + " joined your lobby (" + players.size() + "/" + maxPlayers + ")");
 
         if (players.size() >= minPlayers) startCountdownIfNeeded();
         if (players.size() == maxPlayers) startFullLobbyCountdown();
@@ -155,7 +164,7 @@ public class Lobby {
         participants.remove(playerId);
         privatePartyMembers.remove(playerId);
         if (players.remove(playerId)) {
-            Bukkit.broadcastMessage("§c" + p.getName() + " Left Queue " + players.size() + "/" + maxPlayers);
+            sendLobbyMessage("§c" + p.getName() + " left your lobby (" + players.size() + "/" + maxPlayers + ")");
         }
         if (partyMatch && !activeGame) {
             privatePartyMembers.remove(p.getUniqueId());
@@ -189,8 +198,8 @@ public class Lobby {
         teammates.clear();
         countdownTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             timeLeft--;
-            if (timeLeft == 30) Bukkit.broadcastMessage("30-second warning");
-            if (timeLeft == 10) Bukkit.broadcastMessage("10-second warning");
+            if (timeLeft == 30) sendLobbyMessage("§e30 seconds until the game starts.");
+            if (timeLeft == 10) sendLobbyMessage("§e10 seconds until the game starts.");
             if (timeLeft == 10 && "duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
             if (timeLeft <= 0) {
                 countdownTask.cancel();
@@ -198,7 +207,7 @@ public class Lobby {
                 startGame();
             }
         }, 20L, 20L);
-        Bukkit.broadcastMessage("Lobby " + id + " countdown started: 60 seconds");
+        sendLobbyMessage("§eYour lobby countdown started: 60 seconds.");
     }
 
     private synchronized void startFullLobbyCountdown() {
@@ -218,7 +227,7 @@ public class Lobby {
                 if (player != null) player.sendMessage("§eYour party game starts in 10 seconds.");
             }
         } else {
-            Bukkit.broadcastMessage("Lobby " + id + " is full — 10-second start");
+            sendLobbyMessage("§eYour lobby is full. The game starts in 10 seconds.");
         }
         if ("duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
     }
@@ -227,7 +236,7 @@ public class Lobby {
         if (countdownTask != null) {
             countdownTask.cancel();
             countdownTask = null;
-            Bukkit.broadcastMessage("Lobby " + id + " countdown cancelled (not enough players)");
+            sendLobbyMessage("§cThe countdown was cancelled because there are not enough players.");
         }
         teamsAnnounced = false;
         teammates.clear();
@@ -240,7 +249,7 @@ public class Lobby {
         if ("duos".equalsIgnoreCase(mode) && !teamsAnnounced) assignDuosAndNotify();
         activeGame = true;
         participants = new HashSet<>(players);
-        Bukkit.broadcastMessage("Starting game for lobby " + id);
+        sendLobbyMessage("§aYour game is starting.");
 
         if ("duos".equalsIgnoreCase(mode)) {
             applyTeammateNameTags();
@@ -266,7 +275,7 @@ public class Lobby {
                 if (elapsedTicks < 200) {
                     pollForGeneratedWorld(elapsedTicks + 10);
                 } else {
-                    Bukkit.broadcastMessage("Failed to find created world: " + gameWorld);
+                    sendLobbyMessage("§cFailed to create the game world. Please try again later.");
                     endGame();
                 }
                 return;
@@ -293,7 +302,7 @@ public class Lobby {
             }
 
             gracePeriod = true;
-            Bukkit.broadcastMessage("Grace period has started for lobby " + id + " and will last 5 minutes.");
+            sendLobbyMessage("§eGrace period has started and will last 5 minutes.");
             graceEndTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 gracePeriod = false;
                 for (UUID u : new HashSet<>(players)) {
@@ -306,7 +315,7 @@ public class Lobby {
 
             compassEnableTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 if (!activeGame) return;
-                Bukkit.broadcastMessage("10 minutes have passed — everyone gets a tracking compass!");
+                sendLobbyMessage("§e10 minutes have passed. Everyone gets a tracking compass!");
                 for (UUID u : new HashSet<>(players)) {
                     Player pl = Bukkit.getPlayer(u);
                     if (pl != null && pl.isOnline()) {
