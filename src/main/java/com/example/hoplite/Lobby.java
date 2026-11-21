@@ -714,6 +714,7 @@ public class Lobby {
                 if (!plugin.teleportToPlayerSpawn(p) && lw != null) {
                     p.teleport(lw.getSpawnLocation());
                 }
+                clearPlayerInventory(p);
             }
         }
         players.clear();
@@ -741,7 +742,10 @@ public class Lobby {
                 for (UUID winnerId : new HashSet<>(winnerReturnTicks.keySet())) {
                     Player winner = Bukkit.getPlayer(winnerId);
                     if (winner == null || !winner.isOnline() || game == null || winner.getWorld() != game) {
-                        if (winner != null && winner.isOnline()) winner.clearTitle();
+                        if (winner != null && winner.isOnline()) {
+                            winner.clearTitle();
+                            clearPlayerInventory(winner);
+                        }
                         winnerReturnTicks.remove(winnerId);
                         continue;
                     }
@@ -762,6 +766,7 @@ public class Lobby {
                         }
                         if (teleported && winner.getWorld() != game) {
                             winner.clearTitle();
+                            clearPlayerInventory(winner);
                             winnerReturnTicks.remove(winnerId);
                         }
                     } else {
@@ -781,6 +786,12 @@ public class Lobby {
     private boolean lwExistsOutsideGame() {
         World waitingWorld = Bukkit.getWorld(lobbyWorld);
         return waitingWorld != null && !lobbyWorld.equals(gameWorld);
+    }
+
+    private void clearPlayerInventory(Player player) {
+        player.getInventory().clear();
+        player.getInventory().setArmorContents(new ItemStack[4]);
+        player.getInventory().setItemInOffHand(null);
     }
 
     private synchronized void deleteWorldWhenEmpty() {
