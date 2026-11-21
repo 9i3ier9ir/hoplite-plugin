@@ -15,7 +15,6 @@ import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 import org.bukkit.util.Vector;
 
-import java.io.File;
 import java.util.*;
 
 public class Lobby {
@@ -703,36 +702,8 @@ public class Lobby {
         privatePartyMembers.clear();
         partyMatch = false;
 
-        // 1. Remove from Multiverse (Bypasses confirmation code)
-        Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "mv remove " + gameWorld);
-
-        // 2. Unload world and delete files
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            World world = Bukkit.getWorld(gameWorld);
-            if (world != null) {
-                Bukkit.unloadWorld(world, false);
-            }
-
-            File worldFolder = new File(Bukkit.getWorldContainer(), gameWorld);
-            deleteDirectory(worldFolder);
-            
-            Bukkit.getLogger().info("[Hoplite] Successfully deleted game world: " + gameWorld);
-        }, 40L); 
-    }
-
-    private void deleteDirectory(File directory) {
-        if (directory.exists()) {
-            File[] files = directory.listFiles();
-            if (files != null) {
-                for (File file : files) {
-                    if (file.isDirectory()) {
-                        deleteDirectory(file);
-                    } else {
-                        file.delete();
-                    }
-                }
-            }
-            directory.delete();
-        }
+        Bukkit.getServer().dispatchCommand(
+                Bukkit.getConsoleSender(), "mv delete " + gameWorld + " -f");
+        Bukkit.getLogger().info("[Hoplite] Sent forced Multiverse deletion for game world: " + gameWorld);
     }
 }
