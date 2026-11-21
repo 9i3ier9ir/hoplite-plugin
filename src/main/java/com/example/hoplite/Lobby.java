@@ -311,7 +311,7 @@ public class Lobby {
                 for (UUID u : new HashSet<>(players)) {
                     Player pl = Bukkit.getPlayer(u);
                     if (pl != null && pl.isOnline()) {
-                        Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "msg " + pl.getName() + " Grace period is over! Fight now!");
+                        pl.sendMessage("§eGrace period is over! Fight now!");
                     }
                 }
             }, 5 * 60 * 20L);

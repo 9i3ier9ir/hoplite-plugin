@@ -43,7 +43,7 @@ public class HopliteCommand implements CommandExecutor {
             return true;
         }
         if (!(sender instanceof Player)) {
-            sender.sendMessage("Only players can use this command.");
+            sender.sendMessage("§cOnly players can use this command.");
             return true;
         }
         Player p = (Player) sender;
@@ -67,14 +67,14 @@ public class HopliteCommand implements CommandExecutor {
                 return true;
             case "elo":
                 int rating = plugin.getElo(p.getUniqueId());
-                p.sendMessage("Your ELO: " + rating);
+                p.sendMessage("§eYour ELO: §a" + rating);
                 return true;
             case "eloleader":
                 plugin.sendLeaderboard(sender);
                 return true;
             case "cbal":
                 long coins = plugin.getCoins(p.getUniqueId());
-                p.sendMessage("Your coins: " + coins);
+                p.sendMessage("§eYour coins: §6" + coins);
                 return true;
             case "cleader":
                 plugin.sendCoinLeaderboard(sender);
@@ -295,12 +295,12 @@ public class HopliteCommand implements CommandExecutor {
         // already in a lobby?
         for (Lobby l : plugin.getLobbies()) {
             if (l.hasPlayer(id) || l.isParticipant(id)) {
-                p.sendMessage("You are already in a lobby.");
+                p.sendMessage("§cYou are already in a lobby.");
                 return;
             }
         }
         if (plugin.getWaitingQueue().contains(id)) {
-            p.sendMessage("You are already in the waiting queue.");
+            p.sendMessage("§cYou are already in the waiting queue.");
             return;
         }
 
@@ -318,25 +318,25 @@ public class HopliteCommand implements CommandExecutor {
                 if (lobbyWorld != null) {
                     p.teleport(lobbyWorld.getSpawnLocation());
                 }
-                p.sendMessage("You have joined lobby " + fullestLobby.getId() + ".");
+                p.sendMessage("§aYou have joined lobby " + fullestLobby.getId() + ".");
                 return;
             }
         }
         // all busy/full
         if (!plugin.getWaitingQueue().contains(id)) plugin.getWaitingQueue().add(id);
-        p.sendMessage("All lobbies are currently full or active. You've been placed in the global queue.");
+        p.sendMessage("§eAll lobbies are full or active. You joined the global queue.");
     }
 
     private void handleQueueDuos(Player p) {
         UUID id = p.getUniqueId();
         for (Lobby l : plugin.getLobbies()) {
             if (l.hasPlayer(id) || l.isParticipant(id)) {
-                p.sendMessage("You are already in a lobby.");
+                p.sendMessage("§cYou are already in a lobby.");
                 return;
             }
         }
         if (plugin.getWaitingQueueDuos().contains(id)) {
-            p.sendMessage("You are already in the duos waiting queue.");
+            p.sendMessage("§cYou are already in the duos waiting queue.");
             return;
         }
 
@@ -354,40 +354,40 @@ public class HopliteCommand implements CommandExecutor {
                 if (lobbyWorld != null) {
                     p.teleport(lobbyWorld.getSpawnLocation());
                 }
-                p.sendMessage("You have joined duo lobby " + fullestLobby.getId() + ".");
+                p.sendMessage("§aYou have joined duo lobby " + fullestLobby.getId() + ".");
                 return;
             }
         }
 
         if (!plugin.getWaitingQueueDuos().contains(id)) plugin.getWaitingQueueDuos().add(id);
-        p.sendMessage("All duo lobbies are currently full or active. You've been placed in the duo global queue.");
+        p.sendMessage("§eAll duo lobbies are full or active. You joined the duo global queue.");
     }
 
     private void handleCoinGive(Player p, String[] args) {
         if (args.length < 2) {
-            p.sendMessage("Usage: /coingive <player> <amount>");
+            p.sendMessage("§eUsage: /coingive <player> <amount>");
             return;
         }
         Player target = Bukkit.getPlayer(args[0]);
         if (target == null) {
-            p.sendMessage("Player not found.");
+            p.sendMessage("§cPlayer not found.");
             return;
         }
         try {
             long amount = Long.parseLong(args[1]);
             if (amount <= 0) {
-                p.sendMessage("Amount must be positive.");
+                p.sendMessage("§cAmount must be positive.");
                 return;
             }
             if (!plugin.removeCoins(p.getUniqueId(), amount)) {
-                p.sendMessage("You don't have enough coins.");
+                p.sendMessage("§cYou don't have enough coins.");
                 return;
             }
             plugin.addCoins(target.getUniqueId(), amount);
-            p.sendMessage("Gave " + amount + " coins to " + target.getName());
-            target.sendMessage("Received " + amount + " coins from " + p.getName());
+            p.sendMessage("§aGave " + amount + " coins to " + target.getName() + ".");
+            target.sendMessage("§aReceived " + amount + " coins from " + p.getName() + ".");
         } catch (NumberFormatException e) {
-            p.sendMessage("Invalid amount.");
+            p.sendMessage("§cInvalid amount.");
         }
     }
 
@@ -417,7 +417,7 @@ public class HopliteCommand implements CommandExecutor {
         // Check if player is in an active game
         for (Lobby l : plugin.getLobbies()) {
             if (l.hasPlayer(p.getUniqueId()) && l.isActiveGame()) {
-                p.sendMessage("You cannot use commands during a game.");
+                p.sendMessage("§cYou cannot use commands during a game.");
                 return;
             }
         }

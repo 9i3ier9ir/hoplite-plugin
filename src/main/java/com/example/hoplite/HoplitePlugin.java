@@ -357,12 +357,12 @@ public class HoplitePlugin extends JavaPlugin {
     public void sendLeaderboard(org.bukkit.command.CommandSender sender) {
         List<Map.Entry<UUID,Integer>> list = new ArrayList<>(elo.entrySet());
         list.sort((a,b) -> b.getValue().compareTo(a.getValue()));
-        sender.sendMessage("---- ELO Leaderboard ----");
+        sender.sendMessage("§6§l---- ELO Leaderboard ----");
         int rank=1;
         for (Map.Entry<UUID,Integer> e : list) {
             if (rank>10) break;
             String name = Bukkit.getOfflinePlayer(e.getKey()).getName();
-            sender.sendMessage(rank + ". " + name + " - " + e.getValue());
+            sender.sendMessage("§e" + rank + ". §f" + name + " §7- §a" + e.getValue());
             rank++;
         }
     }
@@ -512,12 +512,12 @@ public class HoplitePlugin extends JavaPlugin {
     public void sendCoinLeaderboard(org.bukkit.command.CommandSender sender) {
         List<Map.Entry<UUID,Long>> list = new ArrayList<>(coins.entrySet());
         list.sort((a,b) -> b.getValue().compareTo(a.getValue()));
-        sender.sendMessage("---- Coin Leaderboard ----");
+        sender.sendMessage("§6§l---- Coin Leaderboard ----");
         int rank=1;
         for (Map.Entry<UUID,Long> e : list) {
             if (rank>10) break;
             String name = Bukkit.getOfflinePlayer(e.getKey()).getName();
-            sender.sendMessage(rank + ". " + name + " - " + e.getValue() + " coins");
+            sender.sendMessage("§e" + rank + ". §f" + name + " §7- §6" + e.getValue() + " coins");
             rank++;
         }
     }
