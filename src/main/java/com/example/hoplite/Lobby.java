@@ -114,17 +114,20 @@ public class Lobby {
 
     // --- LOBBY LOGIC ---
 
-    public synchronized void addPlayer(Player p) {
-        if (activeGame || (partyMatch && !privatePartyMembers.contains(p.getUniqueId()))) return;
-        if (players.size() >= maxPlayers) return;
+    public synchronized boolean addPlayer(Player p) {
+        UUID playerId = p.getUniqueId();
+        if (players.contains(playerId)) return true;
+        if (activeGame || (partyMatch && !privatePartyMembers.contains(playerId))) return false;
+        if (players.size() >= maxPlayers) return false;
         boolean refreshTeams = teamsAnnounced;
-        players.add(p.getUniqueId());
+        players.add(playerId);
         p.sendMessage("§aJoined lobby " + id + " (" + players.size() + "/" + maxPlayers + ")");
          Bukkit.broadcastMessage("§a" + p.getName() + " Joined Queue " + players.size() + "/" + maxPlayers);
 
         if (players.size() >= minPlayers) startCountdownIfNeeded();
         if (players.size() == maxPlayers) startFullLobbyCountdown();
         else if (refreshTeams && teamsAnnounced) assignDuosAndNotify();
+        return true;
     }
 
     public synchronized boolean startPartyMatch(Collection<Player> partyPlayers) {
