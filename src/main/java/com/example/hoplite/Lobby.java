@@ -44,6 +44,9 @@ public class Lobby {
     private BukkitTask compassEnableTask;
     private BukkitTask borderTask;
     private BukkitTask chickenDropTask;
+    private BukkitTask winnerExitTask;
+    private BukkitTask worldDeleteTask;
+    private final Map<UUID, Integer> winnerReturnTicks = new HashMap<>();
 
     private static final class ChickenDrop {
         private final Chicken chicken;
@@ -616,8 +619,11 @@ public class Lobby {
             }
             // If zero or one team/player remains, end
             if (aliveTeams.size() <= 2) {
-                String winnerName = remaining.size() == 1 ? remaining.get(0).getName() : "No one";
-                Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
+                Set<UUID> winnerIds = new HashSet<>();
+                for (Player winner : remaining) winnerIds.add(winner.getUniqueId());
+                String winnerName = remaining.isEmpty() ? "No one" : remaining.stream()
+                    .map(Player::getName).collect(java.util.stream.Collectors.joining(", "));
+                sendLobbyMessage("§6Game finished. Winner: " + winnerName);
                 if (!partyMatch && remaining.size() >= 1) {
                     // award both members if team exists
                     Player pwin = remaining.get(0);
@@ -640,22 +646,23 @@ public class Lobby {
                         }
                     }
                 }
-                endGame();
+                endGame(winnerIds);
             }
         } else {
             if (remaining.size() <= 1) {
                 String winnerName = remaining.size() == 1 ? remaining.get(0).getName() : "No one";
+                Set<UUID> winnerIds = new HashSet<>();
                 if (remaining.size() == 1) {
                     Player winner = remaining.get(0);
-                    winner.sendTitle("§a§lYOU WON!", "", 10, 70, 20);
+                    winnerIds.add(winner.getUniqueId());
                     if (!partyMatch) plugin.addCoins(winner.getUniqueId(), 50);
                 }
-                Bukkit.broadcastMessage("Game " + id + " finished. Winner: " + winnerName);
+                sendLobbyMessage("§6Game finished. Winner: " + winnerName);
                 if (remaining.size() == 1 && !partyMatch) {
                     UUID winnerId = remaining.get(0).getUniqueId();
                     plugin.adjustEloAfterMatch(participants, winnerId);
                 }
-                endGame();
+                endGame(winnerIds);
             }
         }
     }
@@ -674,6 +681,10 @@ public class Lobby {
     }
 
     private synchronized void endGame() {
+        endGame(Collections.emptySet());
+    }
+
+    private synchronized void endGame(Set<UUID> winners) {
         activeGame = false;
         clearChickenDrops();
         clearTeammateNameTags();
@@ -697,6 +708,7 @@ public class Lobby {
         World lw = Bukkit.getWorld(lobbyWorld);
         for (UUID u : new HashSet<>(participants)) {
             plugin.disableTeamChat(u);
+            if (winners.contains(u)) continue;
             Player p = Bukkit.getPlayer(u);
             if (p != null && p.isOnline()) {
                 if (!plugin.teleportToPlayerSpawn(p) && lw != null) {
@@ -711,8 +723,77 @@ public class Lobby {
         privatePartyMembers.clear();
         partyMatch = false;
 
-        Bukkit.getServer().dispatchCommand(
-                Bukkit.getConsoleSender(), "mv delete " + gameWorld + " -f");
-        Bukkit.getLogger().info("[Hoplite] Sent forced Multiverse deletion for game world: " + gameWorld);
+        if (winners.isEmpty()) {
+            deleteWorldWhenEmpty();
+        } else {
+            beginWinnerExit(winners);
+        }
+    }
+
+    private synchronized void beginWinnerExit(Set<UUID> winners) {
+        winnerReturnTicks.clear();
+        for (UUID winner : winners) winnerReturnTicks.put(winner, 0);
+        if (winnerExitTask != null) winnerExitTask.cancel();
+
+        winnerExitTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            synchronized (Lobby.this) {
+                World game = Bukkit.getWorld(gameWorld);
+                for (UUID winnerId : new HashSet<>(winnerReturnTicks.keySet())) {
+                    Player winner = Bukkit.getPlayer(winnerId);
+                    if (winner == null || !winner.isOnline() || game == null || winner.getWorld() != game) {
+                        if (winner != null && winner.isOnline()) winner.clearTitle();
+                        winnerReturnTicks.remove(winnerId);
+                        continue;
+                    }
+
+                    int elapsedTicks = winnerReturnTicks.get(winnerId);
+                    if (elapsedTicks % 20 == 0) {
+                        winner.sendTitle("§a§lYOU WON!", "§eReturning to spawn...", 0, 40, 0);
+                    }
+                    if (elapsedTicks >= 100) {
+                        Location spawn = plugin.getPlayerSpawn();
+                        boolean teleported = spawn != null
+                                && !gameWorld.equals(spawn.getWorld().getName())
+                                && winner.teleport(spawn);
+                        if (!teleported && lwExistsOutsideGame()) {
+                            World waitingWorld = Bukkit.getWorld(lobbyWorld);
+                            teleported = waitingWorld != null
+                                    && winner.teleport(waitingWorld.getSpawnLocation());
+                        }
+                        if (teleported && winner.getWorld() != game) {
+                            winner.clearTitle();
+                            winnerReturnTicks.remove(winnerId);
+                        }
+                    } else {
+                        winnerReturnTicks.put(winnerId, elapsedTicks + 5);
+                    }
+                }
+
+                if (winnerReturnTicks.isEmpty()) {
+                    winnerExitTask.cancel();
+                    winnerExitTask = null;
+                    deleteWorldWhenEmpty();
+                }
+            }
+        }, 0L, 5L);
+    }
+
+    private boolean lwExistsOutsideGame() {
+        World waitingWorld = Bukkit.getWorld(lobbyWorld);
+        return waitingWorld != null && !lobbyWorld.equals(gameWorld);
+    }
+
+    private synchronized void deleteWorldWhenEmpty() {
+        if (worldDeleteTask != null) worldDeleteTask.cancel();
+        worldDeleteTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            World world = Bukkit.getWorld(gameWorld);
+            if (world != null && !world.getPlayers().isEmpty()) return;
+
+            worldDeleteTask.cancel();
+            worldDeleteTask = null;
+            Bukkit.getServer().dispatchCommand(
+                    Bukkit.getConsoleSender(), "mv delete " + gameWorld + " -f");
+            Bukkit.getLogger().info("[Hoplite] Sent forced Multiverse deletion for game world: " + gameWorld);
+        }, 1L, 20L);
     }
 }
