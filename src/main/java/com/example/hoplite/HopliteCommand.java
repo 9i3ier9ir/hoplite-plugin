@@ -59,6 +59,22 @@ public class HopliteCommand implements CommandExecutor {
                 plugin.setPlayerSpawn(p.getLocation());
                 p.sendMessage("§aHoplite spawn set to your current location.");
                 return true;
+            case "lobbycenter":
+                if (args.length != 1) {
+                    p.sendMessage("§eUsage: /lobbycenter <lobby-id>");
+                    return true;
+                }
+                try {
+                    int lobbyId = Integer.parseInt(args[0]);
+                    if (plugin.setLobbyCenter(lobbyId, p.getLocation())) {
+                        p.sendMessage("§aCenter saved for queue lobby " + lobbyId + ".");
+                    } else {
+                        p.sendMessage("§cNo queue lobby has id " + lobbyId + ".");
+                    }
+                } catch (NumberFormatException exception) {
+                    p.sendMessage("§cLobby id must be a number.");
+                }
+                return true;
             case "teamchat":
                 handleTeamChat(p, args);
                 return true;

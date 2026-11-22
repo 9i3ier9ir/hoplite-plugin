@@ -6,10 +6,12 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.entity.Chicken;
-import org.bukkit.entity.Entity;
+import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Boat;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
@@ -27,7 +29,9 @@ public class Lobby {
     private final String mode; // "singles" or "duos"
     private Map<UUID,UUID> teammates = new HashMap<>();
     private final Set<String> scoreboardTeamNames = new HashSet<>();
-    private final Map<UUID, ChickenDrop> chickenDrops = new HashMap<>();
+    private final Set<BalloonDrop> balloonDrops = new HashSet<>();
+    private final Map<UUID, BalloonDrop> playerBalloons = new HashMap<>();
+    private final Set<UUID> slowFallingPlayers = new HashSet<>();
 
     private final Set<UUID> players = new HashSet<>();
     private Set<UUID> participants = new HashSet<>(); 
@@ -43,25 +47,36 @@ public class Lobby {
     private BukkitTask compassTask;
     private BukkitTask compassEnableTask;
     private BukkitTask borderTask;
-    private BukkitTask chickenDropTask;
+    private BukkitTask balloonTask;
     private BukkitTask winnerExitTask;
     private BukkitTask worldDeleteTask;
     private final Map<UUID, Integer> winnerReturnTicks = new HashMap<>();
 
-    private static final class ChickenDrop {
-        private final Chicken chicken;
-        private final Location target;
-        private boolean landing;
-        private boolean warned;
-        private boolean forward;
-        private boolean backward;
-        private boolean left;
-        private boolean right;
-        private boolean fastDrop;
+    private static final class BalloonVisual {
+        private final ArmorStand stand;
+        private final double offsetX;
+        private final double offsetY;
+        private final double offsetZ;
 
-        private ChickenDrop(Chicken chicken, Location target) {
-            this.chicken = chicken;
-            this.target = target;
+        private BalloonVisual(ArmorStand stand, double offsetX, double offsetY, double offsetZ) {
+            this.stand = stand;
+            this.offsetX = offsetX;
+            this.offsetY = offsetY;
+            this.offsetZ = offsetZ;
+        }
+    }
+
+    private static final class BalloonDrop {
+        private final Boat boat;
+        private final Vector direction;
+        private final List<BalloonVisual> visuals = new ArrayList<>();
+        private final Set<UUID> passengers = new HashSet<>();
+        private double distanceTravelled;
+        private int nextWarningDistance = 30;
+
+        private BalloonDrop(Boat boat, Vector direction) {
+            this.boat = boat;
+            this.direction = direction;
         }
     }
 
@@ -262,6 +277,8 @@ public class Lobby {
             Player player = Bukkit.getPlayer(u);
             if (player != null && player.isOnline()) {
                 player.sendTitle("§c§lWORLD LOADING", "§7Preparing the match world...", 10, 100, 10);
+                Location center = plugin.getLobbyCenter(id);
+                if (center != null) player.teleport(center);
             }
         }
 
@@ -291,44 +308,54 @@ public class Lobby {
                 }
             }
 
-            gw.getWorldBorder().setCenter(0, 0);
+                Location center = plugin.getLobbyCenter(id);
+                gw.getWorldBorder().setCenter(center == null ? 0 : center.getX(),
+                    center == null ? 0 : center.getZ());
             gw.getWorldBorder().setSize(1000.0);
 
             Bukkit.getScheduler().runTask(plugin, () -> ChestSpawner.populate(gw, 50));
 
             for (UUID u : new HashSet<>(players)) {
-                Player pl = Bukkit.getPlayer(u);
-                if (pl != null && pl.isOnline()) {
-                    plugin.grantPendingKit(pl);
-                    beginChickenDrop(pl, gw);
+                Player player = Bukkit.getPlayer(u);
+                if (player != null && player.isOnline()) {
+                    clearPlayerInventory(player);
+                    plugin.grantPendingKit(player);
                 }
             }
+            startBalloonDrops(gw);
 
-            gracePeriod = true;
-            sendLobbyMessage("§eGrace period has started and will last 5 minutes.");
-            graceEndTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                gracePeriod = false;
-                for (UUID u : new HashSet<>(players)) {
-                    Player pl = Bukkit.getPlayer(u);
-                    if (pl != null && pl.isOnline()) {
-                        pl.sendMessage("§eGrace period is over! Fight now!");
+            long graceSeconds = Math.max(0, plugin.getConfig().getLong("timers.grace-period-seconds", 300));
+            gracePeriod = graceSeconds > 0;
+            if (gracePeriod) {
+                sendLobbyMessage("§eGrace period has started and will last " + graceSeconds + " seconds.");
+                graceEndTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    gracePeriod = false;
+                    graceEndTask = null;
+                    for (UUID u : new HashSet<>(players)) {
+                        Player pl = Bukkit.getPlayer(u);
+                        if (pl != null && pl.isOnline()) {
+                            pl.sendMessage("§eGrace period is over! Fight now!");
+                        }
                     }
-                }
-            }, 5 * 60 * 20L);
+                }, graceSeconds * 20L);
+            }
 
-            compassEnableTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (!activeGame) return;
-                sendLobbyMessage("§e10 minutes have passed. Everyone gets a tracking compass!");
-                for (UUID u : new HashSet<>(players)) {
-                    Player pl = Bukkit.getPlayer(u);
-                    if (pl != null && pl.isOnline()) {
-                        pl.getInventory().addItem(new ItemStack(Material.COMPASS));
+            long compassMinutes = Math.max(0, plugin.getConfig().getLong("timers.tracking-compass-minutes", 10));
+            if (compassMinutes > 0) {
+                compassEnableTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (!activeGame) return;
+                    sendLobbyMessage("§e" + compassMinutes + " minutes have passed. Everyone gets a tracking compass!");
+                    for (UUID u : new HashSet<>(players)) {
+                        Player pl = Bukkit.getPlayer(u);
+                        if (pl != null && pl.isOnline()) {
+                            pl.getInventory().addItem(new ItemStack(Material.COMPASS));
+                        }
                     }
-                }
-                compassTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-                    updateCompassTargets();
-                }, 0L, 20L);
-            }, 10 * 60 * 20L);
+                    compassTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+                        updateCompassTargets();
+                    }, 0L, 20L);
+                }, compassMinutes * 60 * 20L);
+            }
 
             borderTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
                 World w = Bukkit.getWorld(gameWorld);
@@ -341,29 +368,92 @@ public class Lobby {
         }, 10L);
     }
 
-    private synchronized void beginChickenDrop(Player player, World world) {
+    private synchronized void startBalloonDrops(World world) {
+        Set<UUID> assigned = new HashSet<>();
+        for (UUID playerId : new HashSet<>(players)) {
+            if (!assigned.add(playerId)) continue;
+            Set<UUID> team = new LinkedHashSet<>();
+            team.add(playerId);
+            UUID teammate = teammates.get(playerId);
+            if (teammate != null && players.contains(teammate)) {
+                team.add(teammate);
+                assigned.add(teammate);
+            }
+            beginBalloonDrop(team, world);
+        }
+    }
+
+    private synchronized void beginBalloonDrop(Set<UUID> team, World world) {
         Location target = findSafeLanding(world);
         if (target == null) {
-            player.sendMessage("§cCould not find a safe landing spot. Please rejoin the match.");
+            for (UUID playerId : team) {
+                Player player = Bukkit.getPlayer(playerId);
+                if (player != null && player.isOnline()) {
+                    player.sendMessage("§cCould not find a safe landing spot. Please rejoin the match.");
+                }
+            }
             return;
         }
 
         double angle = Math.random() * Math.PI * 2;
-        Location start = target.clone().add(Math.cos(angle) * 50, 130, Math.sin(angle) * 50);
-        Chicken chicken = world.spawn(start, Chicken.class);
-        chicken.setAI(false);
-        chicken.setInvulnerable(true);
-        chicken.setSilent(true);
-        player.setFallDistance(0);
-        player.teleport(start);
-        chicken.addPassenger(player);
-        chickenDrops.put(player.getUniqueId(), new ChickenDrop(chicken, target));
-        if (chickenDropTask == null) {
-            chickenDropTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickChickenDrops, 1L, 1L);
+        Vector direction = new Vector(Math.cos(angle), 0, Math.sin(angle)).normalize();
+        Location start = target.clone().add(-direction.getX() * 50, 130, -direction.getZ() * 50);
+        Boat boat = world.spawn(start, Boat.class);
+        boat.setGravity(false);
+        boat.setInvulnerable(true);
+        boat.setSilent(true);
+        boat.setCustomName("§6Hot Air Balloon");
+        boat.setCustomNameVisible(true);
+
+        BalloonDrop drop = new BalloonDrop(boat, direction);
+        spawnBalloonVisuals(drop, start, world);
+        for (UUID playerId : team) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player == null || !player.isOnline()) continue;
+            player.setFallDistance(0);
+            player.teleport(start);
+            boat.addPassenger(player);
+            drop.passengers.add(playerId);
+            playerBalloons.put(playerId, drop);
+        }
+        balloonDrops.add(drop);
+        if (balloonTask == null) {
+            balloonTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickBalloons, 1L, 1L);
+        }
+    }
+
+    private void spawnBalloonVisuals(BalloonDrop drop, Location base, World world) {
+        Material[] layerColors = {
+                Material.YELLOW_WOOL, Material.ORANGE_WOOL, Material.RED_WOOL,
+                Material.ORANGE_WOOL, Material.YELLOW_WOOL
+        };
+        for (int layer = -2; layer <= 2; layer++) {
+            int radiusSquared = 4 - Math.abs(layer);
+            for (int x = -2; x <= 2; x++) {
+                for (int z = -2; z <= 2; z++) {
+                    if (x * x + z * z > radiusSquared) continue;
+                    double offsetX = x * 0.75;
+                    double offsetY = 4.0 + layer * 0.75;
+                    double offsetZ = z * 0.75;
+                    ArmorStand stand = world.spawn(base.clone().add(offsetX, offsetY, offsetZ), ArmorStand.class);
+                    stand.setInvisible(true);
+                    stand.setMarker(true);
+                    stand.setGravity(false);
+                    stand.setInvulnerable(true);
+                    stand.setSilent(true);
+                    stand.getEquipment().setHelmet(new ItemStack(layerColors[layer + 2]));
+                    drop.visuals.add(new BalloonVisual(stand, offsetX, offsetY, offsetZ));
+                }
+            }
         }
     }
 
     private Location findSafeLanding(World world) {
+        Location center = plugin.getLobbyCenter(id);
+        if (center != null) {
+            Location centeredTarget = safeSurfaceAt(world, center.getBlockX(), center.getBlockZ());
+            if (centeredTarget != null) return centeredTarget;
+        }
         Random random = new Random();
         for (int attempt = 0; attempt < 300; attempt++) {
             int x = random.nextInt(761) - 380;
@@ -387,119 +477,135 @@ public class Lobby {
         return new Location(world, x + 0.5, y + 1, z + 0.5);
     }
 
-    private synchronized void tickChickenDrops() {
-        Iterator<Map.Entry<UUID, ChickenDrop>> iterator = chickenDrops.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Map.Entry<UUID, ChickenDrop> entry = iterator.next();
-            Player player = Bukkit.getPlayer(entry.getKey());
-            ChickenDrop drop = entry.getValue();
-            if (player == null || !player.isOnline() || player.isDead() || !drop.chicken.isValid()) {
-                drop.landing = true;
-                if (drop.chicken.isValid()) drop.chicken.remove();
-                iterator.remove();
+    private synchronized void tickBalloons() {
+        for (BalloonDrop drop : new HashSet<>(balloonDrops)) {
+            if (!drop.boat.isValid()) {
+                finishBalloon(drop);
+                continue;
+            }
+            if (drop.passengers.isEmpty()) {
+                finishBalloon(drop);
                 continue;
             }
 
-            player.setFallDistance(0);
-            Location current = drop.chicken.getLocation();
-            double dx = drop.target.getX() - current.getX();
-            double dz = drop.target.getZ() - current.getZ();
-            double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
-
-            if (drop.chicken.isOnGround()) {
-                Location landing = safeSurfaceAt(current.getWorld(), current.getBlockX(), current.getBlockZ());
-                landChickenDrop(player, drop, landing == null ? drop.target : landing);
-                iterator.remove();
-                continue;
-            }
-            if (horizontalDistance <= 0.8 && current.getY() <= drop.target.getY() + 1.0) {
-                landChickenDrop(player, drop, drop.target);
-                iterator.remove();
+            if (drop.distanceTravelled >= 50) {
+                for (UUID playerId : new HashSet<>(drop.passengers)) {
+                    Player player = Bukkit.getPlayer(playerId);
+                    if (player != null && player.isOnline()) departBalloon(player, drop);
+                    else drop.passengers.remove(playerId);
+                }
+                finishBalloon(drop);
                 continue;
             }
 
-            Vector horizontal;
-            double forwardInput = (drop.forward ? 1 : 0) - (drop.backward ? 1 : 0);
-            double sidewaysInput = (drop.left ? 1 : 0) - (drop.right ? 1 : 0);
-            if (forwardInput != 0 || sidewaysInput != 0) {
-                double yaw = Math.toRadians(player.getLocation().getYaw());
-                horizontal = new Vector(
-                        -Math.sin(yaw) * forwardInput + Math.cos(yaw) * sidewaysInput,
-                        0,
-                        Math.cos(yaw) * forwardInput + Math.sin(yaw) * sidewaysInput);
-                horizontal.normalize().multiply(0.35);
-            } else {
-                horizontal = new Vector(0, 0, 0);
+            double step = Math.min(0.25, 50 - drop.distanceTravelled);
+            Location next = drop.boat.getLocation().add(drop.direction.clone().multiply(step));
+            next.setYaw((float) Math.toDegrees(Math.atan2(-drop.direction.getX(), drop.direction.getZ())));
+            drop.boat.teleport(next);
+            drop.distanceTravelled += step;
+            for (BalloonVisual visual : drop.visuals) {
+                visual.stand.teleport(next.clone().add(visual.offsetX, visual.offsetY, visual.offsetZ));
             }
-            double verticalSpeed = Math.max(-0.8, Math.min(-0.5,
-                    (drop.target.getY() - current.getY()) * 0.006));
-                if (drop.fastDrop) verticalSpeed *= 2;
-            drop.chicken.setVelocity(new Vector(horizontal.getX(), verticalSpeed, horizontal.getZ()));
+
+            int blocksRemaining = (int) Math.ceil(50 - drop.distanceTravelled);
+            if (blocksRemaining <= drop.nextWarningDistance && drop.nextWarningDistance > 0) {
+                for (UUID playerId : drop.passengers) {
+                    Player player = Bukkit.getPlayer(playerId);
+                    if (player != null && player.isOnline()) {
+                        player.sendMessage("§eDepart in " + drop.nextWarningDistance
+                                + " blocks. Shift to depart early.");
+                    }
+                }
+                drop.nextWarningDistance -= 10;
+            }
         }
 
-        if (chickenDrops.isEmpty() && chickenDropTask != null) {
-            chickenDropTask.cancel();
-            chickenDropTask = null;
+        if (balloonDrops.isEmpty() && balloonTask != null) {
+            balloonTask.cancel();
+            balloonTask = null;
         }
     }
 
-    private void landChickenDrop(Player player, ChickenDrop drop, Location landing) {
-        drop.landing = true;
-        drop.chicken.eject();
-        drop.chicken.remove();
-        player.teleport(landing);
-        player.setFallDistance(0);
-    }
-
-    public synchronized boolean preventChickenDismount(Player player, Entity vehicle) {
-        ChickenDrop drop = chickenDrops.get(player.getUniqueId());
-        if (drop == null || drop.landing || !drop.chicken.getUniqueId().equals(vehicle.getUniqueId())) return false;
-        if (!drop.warned) {
-            player.sendMessage("§eYou can't get off your chicken until it's on the ground.");
-            drop.warned = true;
-        }
+    public synchronized boolean departFromBalloon(Player player) {
+        BalloonDrop drop = playerBalloons.get(player.getUniqueId());
+        if (drop == null) return false;
+        departBalloon(player, drop);
         return true;
     }
 
-    public synchronized void updateChickenDropInput(UUID playerId, boolean forward, boolean backward,
-                                                     boolean left, boolean right, boolean fastDrop) {
-        ChickenDrop drop = chickenDrops.get(playerId);
-        if (drop == null) return;
-        drop.forward = forward;
-        drop.backward = backward;
-        drop.left = left;
-        drop.right = right;
-        drop.fastDrop = fastDrop;
+    private void departBalloon(Player player, BalloonDrop drop) {
+        drop.boat.removePassenger(player);
+        playerBalloons.remove(player.getUniqueId());
+        drop.passengers.remove(player.getUniqueId());
+        slowFallingPlayers.add(player.getUniqueId());
+        player.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 20 * 60 * 60, 0, false, false));
+        if (drop.passengers.isEmpty()) finishBalloon(drop);
+    }
+
+    private void finishBalloon(BalloonDrop drop) {
+        balloonDrops.remove(drop);
+        for (UUID playerId : new HashSet<>(drop.passengers)) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline()) departBalloon(player, drop);
+        }
+        drop.boat.remove();
+        for (BalloonVisual visual : drop.visuals) visual.stand.remove();
+    }
+
+    public synchronized boolean clearSlowFallingOnLanding(Player player, Location destination) {
+        UUID playerId = player.getUniqueId();
+        if (!slowFallingPlayers.contains(playerId) || destination == null) return false;
+        Block feet = destination.getBlock();
+        Block below = destination.getWorld().getBlockAt(destination.getBlockX(),
+                (int) Math.floor(destination.getY() - 0.1), destination.getBlockZ());
+        if (!feet.isLiquid() && !below.isLiquid() && !below.getType().isSolid()) return false;
+        slowFallingPlayers.remove(playerId);
+        player.removePotionEffect(PotionEffectType.SLOW_FALLING);
+        return true;
     }
 
     public synchronized boolean isProtectedFromFall(UUID player) {
-        return chickenDrops.containsKey(player);
+        return playerBalloons.containsKey(player) || slowFallingPlayers.contains(player);
     }
 
-    public synchronized void cancelChickenDrop(UUID playerId) {
-        ChickenDrop drop = chickenDrops.remove(playerId);
+    public synchronized void cancelBalloonDrop(UUID playerId) {
+        BalloonDrop drop = playerBalloons.remove(playerId);
         if (drop != null) {
-            drop.landing = true;
-            drop.chicken.eject();
-            drop.chicken.remove();
+            drop.passengers.remove(playerId);
+            if (drop.passengers.isEmpty()) finishBalloon(drop);
         }
-        if (chickenDrops.isEmpty() && chickenDropTask != null) {
-            chickenDropTask.cancel();
-            chickenDropTask = null;
+        slowFallingPlayers.remove(playerId);
+        if (Bukkit.getPlayer(playerId) != null) {
+            Bukkit.getPlayer(playerId).removePotionEffect(PotionEffectType.SLOW_FALLING);
+        }
+        if (balloonDrops.isEmpty() && balloonTask != null) {
+            balloonTask.cancel();
+            balloonTask = null;
         }
     }
 
-    private synchronized void clearChickenDrops() {
-        for (ChickenDrop drop : chickenDrops.values()) {
-            drop.landing = true;
-            drop.chicken.eject();
-            drop.chicken.remove();
+    private synchronized void clearBalloonDrops() {
+        if (balloonTask != null) {
+            balloonTask.cancel();
+            balloonTask = null;
         }
-        chickenDrops.clear();
-        if (chickenDropTask != null) {
-            chickenDropTask.cancel();
-            chickenDropTask = null;
+        for (BalloonDrop drop : new HashSet<>(balloonDrops)) {
+            for (UUID playerId : new HashSet<>(drop.passengers)) {
+                Player player = Bukkit.getPlayer(playerId);
+                if (player != null && player.isOnline()) player.leaveVehicle();
+            }
+            drop.boat.remove();
+            for (BalloonVisual visual : drop.visuals) visual.stand.remove();
         }
+        balloonDrops.clear();
+        playerBalloons.clear();
+        for (UUID playerId : slowFallingPlayers) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline()) {
+                player.removePotionEffect(PotionEffectType.SLOW_FALLING);
+            }
+        }
+        slowFallingPlayers.clear();
     }
 
     private synchronized void assignDuosAndNotify() {
@@ -686,7 +792,8 @@ public class Lobby {
 
     private synchronized void endGame(Set<UUID> winners) {
         activeGame = false;
-        clearChickenDrops();
+        gracePeriod = false;
+        clearBalloonDrops();
         clearTeammateNameTags();
         if (borderTask != null) {
             borderTask.cancel();
