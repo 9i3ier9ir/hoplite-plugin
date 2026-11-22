@@ -13,6 +13,9 @@ commands:
     description: "Leave the current queue or lobby"
   hoplitesetspawn:
     description: "Set the spawn location used when leaving a queue or match"
+  lobbycenter:
+    description: "Set the center used by a queue lobby"
+    permission: hoplite.lobbycenter
   teamchat:
     description: "Toggle private duo team chat during a match"
   broadcast:
@@ -38,6 +41,9 @@ commands:
 permissions:
   hoplite.reload:
     description: "Reload Hoplite configuration"
+    default: op
+  hoplite.lobbycenter:
+    description: "Set queue lobby centers"
     default: op
   hoplite.command.bypass:
     description: "Bypass Hoplite allowed-command restrictions"

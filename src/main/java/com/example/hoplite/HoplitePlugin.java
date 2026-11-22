@@ -56,29 +56,7 @@ public class HoplitePlugin extends JavaPlugin {
         loadCoins();
         loadKits();
 
-        // Build lobby list from configuration
-        lobbies.clear();
-        int id = 1;
-        for (Map<?,?> entry : getConfig().getMapList("lobbies")) {
-            String lobbyWorld = (String)entry.get("lobbyWorld");
-            String gameWorld = (String)entry.get("gameWorld");
-            int max = entry.containsKey("maxPlayers") ? ((Number)entry.get("maxPlayers")).intValue() : 10;
-            int min = entry.containsKey("minPlayers") ? ((Number)entry.get("minPlayers")).intValue() : 5;
-            String mode = entry.containsKey("mode") ? (String)entry.get("mode") : "singles";
-
-            World w = Bukkit.getWorld(lobbyWorld);
-            if (w == null) {
-                getLogger().info("Lobby world " + lobbyWorld + " is not loaded; attempting to load it.");
-                w = new WorldCreator(lobbyWorld).createWorld();
-            }
-            if (w == null) {
-                getLogger().severe("Configured lobby world missing: " + lobbyWorld + " — check your config.");
-                // do not disable plugin; just skip this lobby
-                continue;
-            }
-            Lobby lobby = new Lobby(this, id++, lobbyWorld, gameWorld, max, min, mode);
-            lobbies.put(lobby.getId(), lobby);
-        }
+        loadLobbiesFromConfig();
 
         // register event listeners
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
@@ -97,6 +75,7 @@ public class HoplitePlugin extends JavaPlugin {
 
         // register commands
         HopliteCommand executor = new HopliteCommand(this);
+        getCommand("lobbycenter").setExecutor(executor);
         getCommand("queue").setExecutor(executor);
         getCommand("q").setExecutor(executor);
         getCommand("elo").setExecutor(executor);
@@ -142,28 +121,81 @@ public class HoplitePlugin extends JavaPlugin {
         loadCoins();
         loadKits();
 
-        int id = 1;
-        for (Map<?, ?> entry : getConfig().getMapList("lobbies")) {
+        loadLobbiesFromConfig();
+        getLogger().info("Hoplite configuration reloaded.");
+    }
+
+    private void loadLobbiesFromConfig() {
+        lobbies.clear();
+        Set<Integer> usedIds = new HashSet<>();
+        List<Map<?, ?>> configuredLobbies = getConfig().getMapList("lobbies");
+        for (int index = 0; index < configuredLobbies.size(); index++) {
+            Map<?, ?> entry = configuredLobbies.get(index);
             String lobbyWorld = (String) entry.get("lobbyWorld");
             String gameWorld = (String) entry.get("gameWorld");
+            int id = entry.get("id") instanceof Number
+                    ? ((Number) entry.get("id")).intValue() : index + 1;
             int max = entry.containsKey("maxPlayers")
                     ? ((Number) entry.get("maxPlayers")).intValue() : 10;
             int min = entry.containsKey("minPlayers")
                     ? ((Number) entry.get("minPlayers")).intValue() : 5;
             String mode = entry.containsKey("mode") ? (String) entry.get("mode") : "singles";
 
-            World world = Bukkit.getWorld(lobbyWorld);
-            if (world == null) {
-                world = new WorldCreator(lobbyWorld).createWorld();
+            if (id < 1 || !usedIds.add(id)) {
+                getLogger().severe("Invalid or duplicate lobby id " + id + " in config.yml.");
+                continue;
             }
+            World world = Bukkit.getWorld(lobbyWorld);
+            if (world == null) world = new WorldCreator(lobbyWorld).createWorld();
             if (world == null) {
                 getLogger().severe("Configured lobby world missing: " + lobbyWorld + " — check your config.");
                 continue;
             }
-            Lobby lobby = new Lobby(this, id++, lobbyWorld, gameWorld, max, min, mode);
-            lobbies.put(lobby.getId(), lobby);
+            lobbies.put(id, new Lobby(this, id, lobbyWorld, gameWorld, max, min, mode));
         }
-        getLogger().info("Hoplite configuration reloaded.");
+    }
+
+    public Location getLobbyCenter(int lobbyId) {
+        List<Map<?, ?>> configuredLobbies = getConfig().getMapList("lobbies");
+        for (int index = 0; index < configuredLobbies.size(); index++) {
+            Map<?, ?> entry = configuredLobbies.get(index);
+            int id = entry.get("id") instanceof Number
+                    ? ((Number) entry.get("id")).intValue() : index + 1;
+            if (id != lobbyId) continue;
+
+            String path = "lobbies." + index + ".center";
+            String worldName = getConfig().getString(path + ".world");
+            World world = worldName == null ? null : Bukkit.getWorld(worldName);
+            if (world == null) return null;
+            return new Location(world,
+                    getConfig().getDouble(path + ".x"),
+                    getConfig().getDouble(path + ".y"),
+                    getConfig().getDouble(path + ".z"),
+                    (float) getConfig().getDouble(path + ".yaw"),
+                    (float) getConfig().getDouble(path + ".pitch"));
+        }
+        return null;
+    }
+
+    public boolean setLobbyCenter(int lobbyId, Location center) {
+        List<Map<?, ?>> configuredLobbies = getConfig().getMapList("lobbies");
+        for (int index = 0; index < configuredLobbies.size(); index++) {
+            Map<?, ?> entry = configuredLobbies.get(index);
+            int id = entry.get("id") instanceof Number
+                    ? ((Number) entry.get("id")).intValue() : index + 1;
+            if (id != lobbyId) continue;
+
+            String path = "lobbies." + index + ".center";
+            getConfig().set(path + ".world", center.getWorld().getName());
+            getConfig().set(path + ".x", center.getX());
+            getConfig().set(path + ".y", center.getY());
+            getConfig().set(path + ".z", center.getZ());
+            getConfig().set(path + ".yaw", center.getYaw());
+            getConfig().set(path + ".pitch", center.getPitch());
+            saveConfig();
+            return true;
+        }
+        return false;
     }
 
     public boolean isCommandAllowed(String state, String command) {

@@ -1,51 +1,68 @@
 # hoplite-plugin configuration
-# define as many lobbies as you want; each entry needs a lobbyWorld (must already exist on server)
+# Define each queue lobby. IDs are the numbers used by /lobbycenter and must be unique.
+# /lobbycenter <id> saves its center under that lobby entry.
+# Each entry needs a lobbyWorld (must already exist on server)
 # and a corresponding gameWorld name (will be generated/removed automatically).
 # optional maxPlayers and minPlayers per lobby (defaults 10 and 5).
 
 lobbies:
   - lobbyWorld: qwait1
+    id: 1
     gameWorld: game1
     maxPlayers: 10
     minPlayers: 5
   - lobbyWorld: qwait2
+    id: 2
     gameWorld: game2
     maxPlayers: 20
     minPlayers: 10
     mode: duos
   - lobbyWorld: qwait3
+    id: 3
     gameWorld: game3
     maxPlayers: 20
     minPlayers: 10
     mode: duos
   - lobbyWorld: qwait4
+    id: 4
     gameWorld: game4
     maxPlayers: 10
     minPlayers: 5
   - lobbyWorld: qwait5
+    id: 5
     gameWorld: game5
     maxPlayers: 10
     minPlayers: 5
   - lobbyWorld: qwait6
+    id: 6
     gameWorld: game6
     maxPlayers: 10
     minPlayers: 5
   - lobbyWorld: qwait7
+    id: 7
     gameWorld: game7
     maxPlayers: 10
     minPlayers: 5
   - lobbyWorld: qwait8
+    id: 8
     gameWorld: game8
     maxPlayers: 10
     minPlayers: 5
   - lobbyWorld: qwait9
+    id: 9
     gameWorld: game9
     maxPlayers: 10
     minPlayers: 5
   - lobbyWorld: qwait10
+    id: 10
     gameWorld: game10
     maxPlayers: 10
     minPlayers: 5
+
+# Match timers are per-game and reset when that lobby's match ends.
+timers:
+  grace-period-seconds: 300
+  tracking-compass-minutes: 10
 
 # Commands players may use while in each Hoplite state.
 # Add command names without the leading slash.
