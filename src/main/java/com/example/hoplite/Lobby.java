@@ -7,6 +7,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Minecart;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
@@ -66,14 +67,14 @@ public class Lobby {
     }
 
     private static final class BalloonDrop {
-        private final ArmorStand carrier;
+        private final Minecart carrier;
         private final Vector direction;
         private final List<BalloonVisual> visuals = new ArrayList<>();
         private final Set<UUID> passengers = new HashSet<>();
         private double distanceTravelled;
         private int nextWarningDistance = 30;
 
-        private BalloonDrop(ArmorStand carrier, Vector direction) {
+        private BalloonDrop(Minecart carrier, Vector direction) {
             this.carrier = carrier;
             this.direction = direction;
         }
@@ -396,10 +397,8 @@ public class Lobby {
 
         double angle = Math.random() * Math.PI * 2;
         Vector direction = new Vector(Math.cos(angle), 0, Math.sin(angle)).normalize();
-        Location start = target.clone().add(-direction.getX() * 50, 130, -direction.getZ() * 50);
-        ArmorStand carrier = world.spawn(start, ArmorStand.class);
-        carrier.setInvisible(true);
-        carrier.setMarker(true);
+        Location start = target.clone().add(-direction.getX() * 100, 130, -direction.getZ() * 100);
+        Minecart carrier = world.spawn(start, Minecart.class);
         carrier.setGravity(false);
         carrier.setInvulnerable(true);
         carrier.setSilent(true);
@@ -489,7 +488,7 @@ public class Lobby {
                 continue;
             }
 
-            if (drop.distanceTravelled >= 50) {
+            if (drop.distanceTravelled >= 100) {
                 for (UUID playerId : new HashSet<>(drop.passengers)) {
                     Player player = Bukkit.getPlayer(playerId);
                     if (player != null && player.isOnline()) departBalloon(player, drop);
@@ -499,7 +498,7 @@ public class Lobby {
                 continue;
             }
 
-            double step = Math.min(0.25, 50 - drop.distanceTravelled);
+            double step = Math.min(0.25, 100 - drop.distanceTravelled);
             Location next = drop.carrier.getLocation().add(drop.direction.clone().multiply(step));
             next.setYaw((float) Math.toDegrees(Math.atan2(-drop.direction.getX(), drop.direction.getZ())));
             drop.carrier.teleport(next);
@@ -508,12 +507,13 @@ public class Lobby {
                 visual.stand.teleport(next.clone().add(visual.offsetX, visual.offsetY, visual.offsetZ));
             }
 
-            int blocksRemaining = (int) Math.ceil(50 - drop.distanceTravelled);
+            int blocksRemaining = (int) Math.ceil(100 - drop.distanceTravelled);
             if (blocksRemaining <= drop.nextWarningDistance && drop.nextWarningDistance > 0) {
                 for (UUID playerId : drop.passengers) {
                     Player player = Bukkit.getPlayer(playerId);
                     if (player != null && player.isOnline()) {
-                        player.sendMessage("§eDepart in " + drop.nextWarningDistance
+                        int departIn = Math.max(0, blocksRemaining);
+                        player.sendMessage("§eDepart in " + departIn
                                 + " blocks. Shift to depart early.");
                     }
                 }
