@@ -7,7 +7,6 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.ArmorStand;
-import org.bukkit.entity.Boat;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
@@ -67,15 +66,15 @@ public class Lobby {
     }
 
     private static final class BalloonDrop {
-        private final Boat boat;
+        private final ArmorStand carrier;
         private final Vector direction;
         private final List<BalloonVisual> visuals = new ArrayList<>();
         private final Set<UUID> passengers = new HashSet<>();
         private double distanceTravelled;
         private int nextWarningDistance = 30;
 
-        private BalloonDrop(Boat boat, Vector direction) {
-            this.boat = boat;
+        private BalloonDrop(ArmorStand carrier, Vector direction) {
+            this.carrier = carrier;
             this.direction = direction;
         }
     }
@@ -398,21 +397,23 @@ public class Lobby {
         double angle = Math.random() * Math.PI * 2;
         Vector direction = new Vector(Math.cos(angle), 0, Math.sin(angle)).normalize();
         Location start = target.clone().add(-direction.getX() * 50, 130, -direction.getZ() * 50);
-        Boat boat = world.spawn(start, Boat.class);
-        boat.setGravity(false);
-        boat.setInvulnerable(true);
-        boat.setSilent(true);
-        boat.setCustomName("§6Hot Air Balloon");
-        boat.setCustomNameVisible(true);
+        ArmorStand carrier = world.spawn(start, ArmorStand.class);
+        carrier.setInvisible(true);
+        carrier.setMarker(true);
+        carrier.setGravity(false);
+        carrier.setInvulnerable(true);
+        carrier.setSilent(true);
+        carrier.setCustomName("§6Hot Air Balloon");
+        carrier.setCustomNameVisible(true);
 
-        BalloonDrop drop = new BalloonDrop(boat, direction);
+        BalloonDrop drop = new BalloonDrop(carrier, direction);
         spawnBalloonVisuals(drop, start, world);
         for (UUID playerId : team) {
             Player player = Bukkit.getPlayer(playerId);
             if (player == null || !player.isOnline()) continue;
             player.setFallDistance(0);
             player.teleport(start);
-            boat.addPassenger(player);
+            carrier.addPassenger(player);
             drop.passengers.add(playerId);
             playerBalloons.put(playerId, drop);
         }
@@ -479,7 +480,7 @@ public class Lobby {
 
     private synchronized void tickBalloons() {
         for (BalloonDrop drop : new HashSet<>(balloonDrops)) {
-            if (!drop.boat.isValid()) {
+            if (!drop.carrier.isValid()) {
                 finishBalloon(drop);
                 continue;
             }
@@ -499,9 +500,9 @@ public class Lobby {
             }
 
             double step = Math.min(0.25, 50 - drop.distanceTravelled);
-            Location next = drop.boat.getLocation().add(drop.direction.clone().multiply(step));
+            Location next = drop.carrier.getLocation().add(drop.direction.clone().multiply(step));
             next.setYaw((float) Math.toDegrees(Math.atan2(-drop.direction.getX(), drop.direction.getZ())));
-            drop.boat.teleport(next);
+            drop.carrier.teleport(next);
             drop.distanceTravelled += step;
             for (BalloonVisual visual : drop.visuals) {
                 visual.stand.teleport(next.clone().add(visual.offsetX, visual.offsetY, visual.offsetZ));
@@ -534,7 +535,7 @@ public class Lobby {
     }
 
     private void departBalloon(Player player, BalloonDrop drop) {
-        drop.boat.removePassenger(player);
+        drop.carrier.removePassenger(player);
         playerBalloons.remove(player.getUniqueId());
         drop.passengers.remove(player.getUniqueId());
         slowFallingPlayers.add(player.getUniqueId());
@@ -548,7 +549,7 @@ public class Lobby {
             Player player = Bukkit.getPlayer(playerId);
             if (player != null && player.isOnline()) departBalloon(player, drop);
         }
-        drop.boat.remove();
+        drop.carrier.remove();
         for (BalloonVisual visual : drop.visuals) visual.stand.remove();
     }
 
@@ -594,7 +595,7 @@ public class Lobby {
                 Player player = Bukkit.getPlayer(playerId);
                 if (player != null && player.isOnline()) player.leaveVehicle();
             }
-            drop.boat.remove();
+            drop.carrier.remove();
             for (BalloonVisual visual : drop.visuals) visual.stand.remove();
         }
         balloonDrops.clear();
