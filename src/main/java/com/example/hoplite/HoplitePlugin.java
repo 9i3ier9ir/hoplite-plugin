@@ -54,8 +54,13 @@ public class HoplitePlugin extends JavaPlugin {
 
         saveDefaultConfig();
         String activationCode = getConfig().getString("activation-code", "");
-        if (activationCode == null || !activationCode.matches("[0-9]{4}")) {
-            getLogger().severe("Put the code in config.yml (activation-code must be exactly four digits).");
+        String expectedActivationCode = System.getenv("HOPLITE_ACTIVATION_CODE");
+        if (activationCode == null || !activationCode.matches("[0-9]{4}")
+                || expectedActivationCode == null || !expectedActivationCode.matches("[0-9]{4}")
+                || !java.security.MessageDigest.isEqual(
+                        activationCode.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        expectedActivationCode.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+            getLogger().severe("Put the code in config.yml and set the matching HOPLITE_ACTIVATION_CODE environment variable.");
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
