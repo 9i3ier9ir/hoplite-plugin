@@ -4,6 +4,7 @@
 # Each entry needs a lobbyWorld (must already exist on server)
 # and a corresponding gameWorld name (will be generated/removed automatically).
 # optional maxPlayers and minPlayers per lobby (defaults 10 and 5).
+# Center coordinates do not change either value; they only control the lobby's teleport location.
 
 lobbies:
   - lobbyWorld: qwait1
@@ -59,10 +60,33 @@ lobbies:
     maxPlayers: 10
     minPlayers: 5
 
+# /lobbycenter <id> writes coordinates here without changing the lobbies list.
+# Example:
+# lobby-centers:
+#   1:
+#     world: qwait1
+#     x: 0.5
+#     y: 65.0
+#     z: 0.5
+#     yaw: 0.0
+#     pitch: 0.0
+lobby-centers: {}
+
 # Match timers are per-game and reset when that lobby's match ends.
 timers:
   grace-period-seconds: 300
   tracking-compass-minutes: 10
+
+# Set enabled to true on every server that should share player data.
+# Create the database first and use the same credentials/table-prefix on all servers.
+database:
+  enabled: false
+  host: localhost
+  port: 3306
+  name: hoplite
+  username: hoplite
+  password: change-me
+  table-prefix: hoplite_
 
 # Commands players may use while in each Hoplite state.
 # Add command names without the leading slash.

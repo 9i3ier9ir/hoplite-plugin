@@ -1,6 +1,7 @@
 package com.example.hoplite;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -8,6 +9,7 @@ import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
@@ -135,11 +137,38 @@ public class PlayerListener implements Listener {
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent e) {
         Player p = e.getEntity();
-        for (Lobby l : plugin.getLobbies()) {
-            if (l.hasPlayer(p.getUniqueId())) {
-                // mark as dead/eliminated
-                l.playerDied(p.getUniqueId());
+        for (Lobby lobby : plugin.getLobbies()) {
+            if (!lobby.hasPlayer(p.getUniqueId())) continue;
+            if (lobby.isActiveGame()) {
+                lobby.playerDied(p.getUniqueId());
+            } else {
+                lobby.keepPlayerInQueue(p);
             }
+        }
+    }
+
+    @EventHandler
+    public void onPlayerRespawn(PlayerRespawnEvent e) {
+        Player p = e.getPlayer();
+        Lobby activeLobby = null;
+        for (Lobby lobby : plugin.getLobbies()) {
+            if (lobby.isParticipant(p.getUniqueId()) && lobby.isActiveGame()) {
+                activeLobby = lobby;
+                plugin.getWaitingQueue().remove(p.getUniqueId());
+                plugin.getWaitingQueueDuos().remove(p.getUniqueId());
+                break;
+            }
+            if (!lobby.isActiveGame() && lobby.hasPlayer(p.getUniqueId())) {
+                Location center = plugin.getLobbyCenter(lobby.getId());
+                if (center != null) e.setRespawnLocation(center);
+                p.setFallDistance(0);
+                return;
+            }
+        }
+        if (activeLobby != null) {
+            Location spawn = plugin.getPlayerSpawn();
+            if (spawn != null) e.setRespawnLocation(spawn);
+            p.setFallDistance(0);
         }
     }
 

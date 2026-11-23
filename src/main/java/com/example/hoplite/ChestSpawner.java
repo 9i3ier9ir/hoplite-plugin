@@ -8,6 +8,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.enchantments.Enchantment;
 
 import java.util.ArrayList;
@@ -106,7 +107,8 @@ public class ChestSpawner {
                 items.add(new ItemStack(Material.FIREWORK_ROCKET, randomBetween(1,5)));
                 items.add(new ItemStack(Material.TOTEM_OF_UNDYING,1));
                 items.add(new ItemStack(Material.ENCHANTED_BOOK,1));
-                items.get(items.size()-1).addEnchantment(Enchantment.MENDING,1);
+                ItemStack mendingBook = items.get(items.size()-1);
+                addStoredEnchantment(mendingBook, Enchantment.MENDING, 1);
                 break;
             case GODLY:
                 items.add(new ItemStack(Material.NETHERITE_HELMET,1));
@@ -125,7 +127,8 @@ public class ChestSpawner {
                 items.add(new ItemStack(Material.BEACON,1));
                 items.add(new ItemStack(Material.DRAGON_EGG,1));
                 items.add(new ItemStack(Material.ENCHANTED_BOOK,1));
-                items.get(items.size()-1).addEnchantment(Enchantment.ARROW_INFINITE,1);
+                ItemStack infinityBook = items.get(items.size()-1);
+                addStoredEnchantment(infinityBook, Enchantment.ARROW_INFINITE, 1);
                 break;
             case ENCHANTING:
                 items.add(new ItemStack(Material.LAPIS_LAZULI, randomBetween(15,20)));
@@ -136,6 +139,13 @@ public class ChestSpawner {
                 break;
         }
         return items;
+    }
+
+    private static void addStoredEnchantment(ItemStack item, Enchantment enchantment, int level) {
+        if (item.getType() != Material.ENCHANTED_BOOK
+                || !(item.getItemMeta() instanceof EnchantmentStorageMeta meta)) return;
+        meta.addStoredEnchant(enchantment, level, true);
+        item.setItemMeta(meta);
     }
 
     private static int randomBetween(int a, int b) {

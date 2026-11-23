@@ -7,7 +7,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.ArmorStand;
-import org.bukkit.entity.Boat;
+import org.bukkit.entity.Minecart;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
@@ -48,9 +48,7 @@ public class Lobby {
     private BukkitTask compassEnableTask;
     private BukkitTask borderTask;
     private BukkitTask balloonTask;
-    private BukkitTask winnerExitTask;
     private BukkitTask worldDeleteTask;
-    private final Map<UUID, Integer> winnerReturnTicks = new HashMap<>();
 
     private static final class BalloonVisual {
         private final ArmorStand stand;
@@ -67,15 +65,15 @@ public class Lobby {
     }
 
     private static final class BalloonDrop {
-        private final Boat boat;
+        private final Minecart carrier;
         private final Vector direction;
         private final List<BalloonVisual> visuals = new ArrayList<>();
         private final Set<UUID> passengers = new HashSet<>();
         private double distanceTravelled;
         private int nextWarningDistance = 30;
 
-        private BalloonDrop(Boat boat, Vector direction) {
-            this.boat = boat;
+        private BalloonDrop(Minecart carrier, Vector direction) {
+            this.carrier = carrier;
             this.direction = direction;
         }
     }
@@ -397,22 +395,22 @@ public class Lobby {
 
         double angle = Math.random() * Math.PI * 2;
         Vector direction = new Vector(Math.cos(angle), 0, Math.sin(angle)).normalize();
-        Location start = target.clone().add(-direction.getX() * 50, 130, -direction.getZ() * 50);
-        Boat boat = world.spawn(start, Boat.class);
-        boat.setGravity(false);
-        boat.setInvulnerable(true);
-        boat.setSilent(true);
-        boat.setCustomName("§6Hot Air Balloon");
-        boat.setCustomNameVisible(true);
+        Location start = target.clone().add(-direction.getX() * 100, 130, -direction.getZ() * 100);
+        Minecart carrier = world.spawn(start, Minecart.class);
+        carrier.setGravity(false);
+        carrier.setInvulnerable(true);
+        carrier.setSilent(true);
+        carrier.setCustomName("§6Hot Air Balloon");
+        carrier.setCustomNameVisible(true);
 
-        BalloonDrop drop = new BalloonDrop(boat, direction);
+        BalloonDrop drop = new BalloonDrop(carrier, direction);
         spawnBalloonVisuals(drop, start, world);
         for (UUID playerId : team) {
             Player player = Bukkit.getPlayer(playerId);
             if (player == null || !player.isOnline()) continue;
             player.setFallDistance(0);
             player.teleport(start);
-            boat.addPassenger(player);
+            carrier.addPassenger(player);
             drop.passengers.add(playerId);
             playerBalloons.put(playerId, drop);
         }
@@ -479,7 +477,7 @@ public class Lobby {
 
     private synchronized void tickBalloons() {
         for (BalloonDrop drop : new HashSet<>(balloonDrops)) {
-            if (!drop.boat.isValid()) {
+            if (!drop.carrier.isValid()) {
                 finishBalloon(drop);
                 continue;
             }
@@ -488,7 +486,7 @@ public class Lobby {
                 continue;
             }
 
-            if (drop.distanceTravelled >= 50) {
+            if (drop.distanceTravelled >= 100) {
                 for (UUID playerId : new HashSet<>(drop.passengers)) {
                     Player player = Bukkit.getPlayer(playerId);
                     if (player != null && player.isOnline()) departBalloon(player, drop);
@@ -498,21 +496,22 @@ public class Lobby {
                 continue;
             }
 
-            double step = Math.min(0.25, 50 - drop.distanceTravelled);
-            Location next = drop.boat.getLocation().add(drop.direction.clone().multiply(step));
+            double step = Math.min(0.25, 100 - drop.distanceTravelled);
+            Location next = drop.carrier.getLocation().add(drop.direction.clone().multiply(step));
             next.setYaw((float) Math.toDegrees(Math.atan2(-drop.direction.getX(), drop.direction.getZ())));
-            drop.boat.teleport(next);
+            drop.carrier.teleport(next);
             drop.distanceTravelled += step;
             for (BalloonVisual visual : drop.visuals) {
                 visual.stand.teleport(next.clone().add(visual.offsetX, visual.offsetY, visual.offsetZ));
             }
 
-            int blocksRemaining = (int) Math.ceil(50 - drop.distanceTravelled);
+            int blocksRemaining = (int) Math.ceil(100 - drop.distanceTravelled);
             if (blocksRemaining <= drop.nextWarningDistance && drop.nextWarningDistance > 0) {
                 for (UUID playerId : drop.passengers) {
                     Player player = Bukkit.getPlayer(playerId);
                     if (player != null && player.isOnline()) {
-                        player.sendMessage("§eDepart in " + drop.nextWarningDistance
+                        int departIn = Math.max(0, blocksRemaining);
+                        player.sendMessage("§eDepart in " + departIn
                                 + " blocks. Shift to depart early.");
                     }
                 }
@@ -534,7 +533,7 @@ public class Lobby {
     }
 
     private void departBalloon(Player player, BalloonDrop drop) {
-        drop.boat.removePassenger(player);
+        drop.carrier.removePassenger(player);
         playerBalloons.remove(player.getUniqueId());
         drop.passengers.remove(player.getUniqueId());
         slowFallingPlayers.add(player.getUniqueId());
@@ -548,7 +547,7 @@ public class Lobby {
             Player player = Bukkit.getPlayer(playerId);
             if (player != null && player.isOnline()) departBalloon(player, drop);
         }
-        drop.boat.remove();
+        drop.carrier.remove();
         for (BalloonVisual visual : drop.visuals) visual.stand.remove();
     }
 
@@ -594,7 +593,7 @@ public class Lobby {
                 Player player = Bukkit.getPlayer(playerId);
                 if (player != null && player.isOnline()) player.leaveVehicle();
             }
-            drop.boat.remove();
+            drop.carrier.remove();
             for (BalloonVisual visual : drop.visuals) visual.stand.remove();
         }
         balloonDrops.clear();
@@ -661,8 +660,25 @@ public class Lobby {
     }
 
     public synchronized void playerDied(UUID playerId) {
+        if (!activeGame) return;
         players.remove(playerId);
+        plugin.getWaitingQueue().remove(playerId);
+        plugin.getWaitingQueueDuos().remove(playerId);
         checkForWinner();
+    }
+
+    public synchronized void keepPlayerInQueue(Player player) {
+        UUID playerId = player.getUniqueId();
+        if (activeGame) return;
+        players.add(playerId);
+        Location center = plugin.getLobbyCenter(id);
+        if (center != null) {
+            player.teleport(center);
+        } else {
+            World waitingWorld = Bukkit.getWorld(lobbyWorld);
+            if (waitingWorld != null) player.teleport(waitingWorld.getSpawnLocation());
+        }
+        player.setFallDistance(0);
     }
 
     public synchronized boolean isGracePeriod() {
@@ -815,9 +831,9 @@ public class Lobby {
         World lw = Bukkit.getWorld(lobbyWorld);
         for (UUID u : new HashSet<>(participants)) {
             plugin.disableTeamChat(u);
-            if (winners.contains(u)) continue;
             Player p = Bukkit.getPlayer(u);
             if (p != null && p.isOnline()) {
+                p.setFallDistance(0);
                 if (!plugin.teleportToPlayerSpawn(p) && lw != null) {
                     p.teleport(lw.getSpawnLocation());
                 }
@@ -831,63 +847,7 @@ public class Lobby {
         privatePartyMembers.clear();
         partyMatch = false;
 
-        if (winners.isEmpty()) {
-            deleteWorldWhenEmpty();
-        } else {
-            beginWinnerExit(winners);
-        }
-    }
-
-    private synchronized void beginWinnerExit(Set<UUID> winners) {
-        winnerReturnTicks.clear();
-        for (UUID winner : winners) winnerReturnTicks.put(winner, 0);
-        if (winnerExitTask != null) winnerExitTask.cancel();
-
-        winnerExitTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            synchronized (Lobby.this) {
-                World game = Bukkit.getWorld(gameWorld);
-                for (UUID winnerId : new HashSet<>(winnerReturnTicks.keySet())) {
-                    Player winner = Bukkit.getPlayer(winnerId);
-                    if (winner == null || !winner.isOnline() || game == null || winner.getWorld() != game) {
-                        if (winner != null && winner.isOnline()) {
-                            winner.clearTitle();
-                            clearPlayerInventory(winner);
-                        }
-                        winnerReturnTicks.remove(winnerId);
-                        continue;
-                    }
-
-                    int elapsedTicks = winnerReturnTicks.get(winnerId);
-                    if (elapsedTicks % 20 == 0) {
-                        winner.sendTitle("§a§lYOU WON!", "§eReturning to spawn...", 0, 40, 0);
-                    }
-                    if (elapsedTicks >= 100) {
-                        Location spawn = plugin.getPlayerSpawn();
-                        boolean teleported = spawn != null
-                                && !gameWorld.equals(spawn.getWorld().getName())
-                                && winner.teleport(spawn);
-                        if (!teleported && lwExistsOutsideGame()) {
-                            World waitingWorld = Bukkit.getWorld(lobbyWorld);
-                            teleported = waitingWorld != null
-                                    && winner.teleport(waitingWorld.getSpawnLocation());
-                        }
-                        if (teleported && winner.getWorld() != game) {
-                            winner.clearTitle();
-                            clearPlayerInventory(winner);
-                            winnerReturnTicks.remove(winnerId);
-                        }
-                    } else {
-                        winnerReturnTicks.put(winnerId, elapsedTicks + 5);
-                    }
-                }
-
-                if (winnerReturnTicks.isEmpty()) {
-                    winnerExitTask.cancel();
-                    winnerExitTask = null;
-                    deleteWorldWhenEmpty();
-                }
-            }
-        }, 0L, 5L);
+        deleteWorldWhenEmpty();
     }
 
     private boolean lwExistsOutsideGame() {

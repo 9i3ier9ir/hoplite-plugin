@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.LinkedHashSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.io.File;
+import java.sql.SQLException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import java.io.IOException;
 
@@ -45,6 +46,7 @@ public class HoplitePlugin extends JavaPlugin {
     private YamlConfiguration eloYaml;
     private YamlConfiguration coinsYaml;
     private YamlConfiguration kitsYaml;
+    private PlayerDataDatabase playerDatabase;
 
     @Override
     public void onEnable() {
@@ -55,6 +57,7 @@ public class HoplitePlugin extends JavaPlugin {
         loadElo();
         loadCoins();
         loadKits();
+        configurePlayerDatabase();
 
         loadLobbiesFromConfig();
 
@@ -105,9 +108,11 @@ public class HoplitePlugin extends JavaPlugin {
     public void onDisable() {
         getLogger().info("HoplitePlugin disabling...");
         lobbies.values().forEach(Lobby::forceReset);
+        closePlayerDatabase();
     }
 
     public void reloadAllConfigs() {
+        closePlayerDatabase();
         for (Lobby lobby : new ArrayList<>(lobbies.values())) {
             lobby.forceReset();
         }
@@ -117,12 +122,109 @@ public class HoplitePlugin extends JavaPlugin {
 
         reloadConfig();
         setupDataFiles();
+        elo.clear();
+        coins.clear();
         loadElo();
         loadCoins();
         loadKits();
+        configurePlayerDatabase();
 
         loadLobbiesFromConfig();
         getLogger().info("Hoplite configuration reloaded.");
+    }
+
+    private void configurePlayerDatabase() {
+        if (!getConfig().getBoolean("database.enabled", false)) return;
+        try {
+            playerDatabase = new PlayerDataDatabase(
+                    getConfig().getString("database.host", "localhost"),
+                    getConfig().getInt("database.port", 3306),
+                    getConfig().getString("database.name", "hoplite"),
+                    getConfig().getString("database.username", "hoplite"),
+                    getConfig().getString("database.password", ""),
+                    getConfig().getString("database.table-prefix", "hoplite_"));
+            playerDatabase.importLegacyData(new HashMap<>(coins), new HashMap<>(elo),
+                    copyOwnedKits());
+            Map<String, String> serializedKits = new HashMap<>();
+            Set<String> customNames = new HashSet<>();
+            for (KitData.Kit kit : KitData.KITS) {
+                serializedKits.put(kit.name, serializeKitItems(kit));
+            }
+            for (KitData.Kit kit : KitData.getCustomKits()) customNames.add(kit.name);
+            playerDatabase.importLegacyKitDefinitions(KitData.KITS, customNames, serializedKits);
+            refreshKitDefinitionsFromDatabase();
+            getLogger().info("Connected to the shared MySQL/MariaDB player database.");
+        } catch (Exception exception) {
+            closePlayerDatabase();
+            getLogger().log(java.util.logging.Level.SEVERE,
+                    "Could not connect to the configured player database; using local YAML data.", exception);
+        }
+    }
+
+    private Map<UUID, Set<String>> copyOwnedKits() {
+        Map<UUID, Set<String>> copy = new HashMap<>();
+        for (Map.Entry<UUID, Set<String>> entry : ownedKits.entrySet()) {
+            copy.put(entry.getKey(), new HashSet<>(entry.getValue()));
+        }
+        return copy;
+    }
+
+    private void closePlayerDatabase() {
+        if (playerDatabase == null) return;
+        playerDatabase.close();
+        playerDatabase = null;
+    }
+
+    public void refreshKitDefinitionsFromDatabase() {
+        if (playerDatabase == null) return;
+        try {
+            List<PlayerDataDatabase.KitDefinition> definitions = playerDatabase.getKitDefinitions();
+            KitData.clearCustomKits();
+            for (PlayerDataDatabase.KitDefinition definition : definitions) {
+                KitData.Kit existing = KitData.getKit(definition.name);
+                if (!definition.custom) {
+                    if (existing != null) existing.price = definition.price;
+                    continue;
+                }
+                Material icon = Material.matchMaterial(definition.icon);
+                ItemStack[] items = deserializeKitItems(definition.itemsYaml);
+                if (icon != null && items.length > 0) {
+                    KitData.addCustomKit(new KitData.Kit(definition.name, definition.price, icon, items));
+                }
+            }
+        } catch (SQLException exception) {
+            logDatabaseOperationFailure("refresh kit definitions", exception);
+        }
+    }
+
+    private String serializeKitItems(KitData.Kit kit) {
+        YamlConfiguration serialized = new YamlConfiguration();
+        serialized.set("items", java.util.Arrays.asList(kit.items));
+        return serialized.saveToString();
+    }
+
+    private ItemStack[] deserializeKitItems(String serializedItems) {
+        YamlConfiguration serialized = new YamlConfiguration();
+        try {
+            serialized.loadFromString(serializedItems);
+        } catch (org.bukkit.configuration.InvalidConfigurationException exception) {
+            getLogger().warning("Could not load stored items for kit definition: " + exception.getMessage());
+            return new ItemStack[0];
+        }
+        List<ItemStack> items = new ArrayList<>();
+        for (Object value : serialized.getList("items", new ArrayList<>())) {
+            if (value instanceof ItemStack) items.add(((ItemStack) value).clone());
+        }
+        return items.toArray(new ItemStack[0]);
+    }
+
+    private void saveKitDefinitionToDatabase(KitData.Kit kit) {
+        if (playerDatabase == null) return;
+        try {
+            playerDatabase.saveKitDefinition(kit, KitData.isCustomKit(kit), serializeKitItems(kit));
+        } catch (SQLException exception) {
+            logDatabaseOperationFailure("save kit definition", exception);
+        }
     }
 
     private void loadLobbiesFromConfig() {
@@ -156,6 +258,20 @@ public class HoplitePlugin extends JavaPlugin {
     }
 
     public Location getLobbyCenter(int lobbyId) {
+        String centerPath = "lobby-centers." + lobbyId;
+        String centerWorldName = getConfig().getString(centerPath + ".world");
+        if (centerWorldName != null) {
+            World centerWorld = Bukkit.getWorld(centerWorldName);
+            if (centerWorld != null) {
+                return new Location(centerWorld,
+                        getConfig().getDouble(centerPath + ".x"),
+                        getConfig().getDouble(centerPath + ".y"),
+                        getConfig().getDouble(centerPath + ".z"),
+                        (float) getConfig().getDouble(centerPath + ".yaw"),
+                        (float) getConfig().getDouble(centerPath + ".pitch"));
+            }
+        }
+
         List<Map<?, ?>> configuredLobbies = getConfig().getMapList("lobbies");
         for (int index = 0; index < configuredLobbies.size(); index++) {
             Map<?, ?> entry = configuredLobbies.get(index);
@@ -163,39 +279,37 @@ public class HoplitePlugin extends JavaPlugin {
                     ? ((Number) entry.get("id")).intValue() : index + 1;
             if (id != lobbyId) continue;
 
-            String path = "lobbies." + index + ".center";
-            String worldName = getConfig().getString(path + ".world");
-            World world = worldName == null ? null : Bukkit.getWorld(worldName);
+            Object legacyCenter = entry.get("center");
+            if (!(legacyCenter instanceof Map<?, ?>)) return null;
+            Map<?, ?> center = (Map<?, ?>) legacyCenter;
+            Object worldValue = center.get("world");
+            World world = worldValue instanceof String ? Bukkit.getWorld((String) worldValue) : null;
             if (world == null) return null;
             return new Location(world,
-                    getConfig().getDouble(path + ".x"),
-                    getConfig().getDouble(path + ".y"),
-                    getConfig().getDouble(path + ".z"),
-                    (float) getConfig().getDouble(path + ".yaw"),
-                    (float) getConfig().getDouble(path + ".pitch"));
+                    numberValue(center.get("x")),
+                    numberValue(center.get("y")),
+                    numberValue(center.get("z")),
+                    (float) numberValue(center.get("yaw")),
+                    (float) numberValue(center.get("pitch")));
         }
         return null;
     }
 
     public boolean setLobbyCenter(int lobbyId, Location center) {
-        List<Map<?, ?>> configuredLobbies = getConfig().getMapList("lobbies");
-        for (int index = 0; index < configuredLobbies.size(); index++) {
-            Map<?, ?> entry = configuredLobbies.get(index);
-            int id = entry.get("id") instanceof Number
-                    ? ((Number) entry.get("id")).intValue() : index + 1;
-            if (id != lobbyId) continue;
+        if (getLobbyById(lobbyId) == null || center.getWorld() == null) return false;
+        String path = "lobby-centers." + lobbyId;
+        getConfig().set(path + ".world", center.getWorld().getName());
+        getConfig().set(path + ".x", center.getX());
+        getConfig().set(path + ".y", center.getY());
+        getConfig().set(path + ".z", center.getZ());
+        getConfig().set(path + ".yaw", center.getYaw());
+        getConfig().set(path + ".pitch", center.getPitch());
+        saveConfig();
+        return true;
+    }
 
-            String path = "lobbies." + index + ".center";
-            getConfig().set(path + ".world", center.getWorld().getName());
-            getConfig().set(path + ".x", center.getX());
-            getConfig().set(path + ".y", center.getY());
-            getConfig().set(path + ".z", center.getZ());
-            getConfig().set(path + ".yaw", center.getYaw());
-            getConfig().set(path + ".pitch", center.getPitch());
-            saveConfig();
-            return true;
-        }
-        return false;
+    private double numberValue(Object value) {
+        return value instanceof Number ? ((Number) value).doubleValue() : 0.0;
     }
 
     public boolean isCommandAllowed(String state, String command) {
@@ -357,6 +471,15 @@ public class HoplitePlugin extends JavaPlugin {
     }
 
     public int getElo(UUID player) {
+        if (playerDatabase != null) {
+            try {
+                int rating = playerDatabase.getStats(player).elo;
+                elo.put(player, rating);
+                return rating;
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("read ELO", exception);
+            }
+        }
         return elo.computeIfAbsent(player, u -> {
             int val = 1000;
             if (eloYaml != null) val = eloYaml.getInt("elo." + u.toString(), 1000);
@@ -366,6 +489,15 @@ public class HoplitePlugin extends JavaPlugin {
     }
 
     public void changeElo(UUID player, int delta) {
+        if (playerDatabase != null) {
+            try {
+                elo.put(player, playerDatabase.changeElo(player, delta));
+                return;
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("update ELO", exception);
+                return;
+            }
+        }
         int current = getElo(player);
         int updated = current + delta;
         elo.put(player, updated);
@@ -387,6 +519,20 @@ public class HoplitePlugin extends JavaPlugin {
     }
 
     public void sendLeaderboard(org.bukkit.command.CommandSender sender) {
+        if (playerDatabase != null) {
+            try {
+                sender.sendMessage("§6§l---- ELO Leaderboard ----");
+                int rank = 1;
+                for (PlayerDataDatabase.PlayerStats stats : playerDatabase.getLeaderboard("elo", 10)) {
+                    String name = Bukkit.getOfflinePlayer(stats.playerId).getName();
+                    sender.sendMessage("§e" + rank++ + ". §f"
+                            + (name == null ? "Unknown" : name) + " §7- §a" + stats.elo);
+                }
+                return;
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("load ELO leaderboard", exception);
+            }
+        }
         List<Map.Entry<UUID,Integer>> list = new ArrayList<>(elo.entrySet());
         list.sort((a,b) -> b.getValue().compareTo(a.getValue()));
         sender.sendMessage("§6§l---- ELO Leaderboard ----");
@@ -401,6 +547,17 @@ public class HoplitePlugin extends JavaPlugin {
 
     public String getEloLeaderboardEntry(int rank) {
         if (rank < 1 || rank > 10) return "";
+        if (playerDatabase != null) {
+            try {
+                List<PlayerDataDatabase.PlayerStats> entries = playerDatabase.getLeaderboard("elo", 10);
+                if (rank > entries.size()) return "";
+                PlayerDataDatabase.PlayerStats stats = entries.get(rank - 1);
+                String name = Bukkit.getOfflinePlayer(stats.playerId).getName();
+                return (name == null ? "Unknown" : name) + " - " + stats.elo;
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("load ELO leaderboard entry", exception);
+            }
+        }
         List<Map.Entry<UUID,Integer>> list = new ArrayList<>(elo.entrySet());
         list.sort((a,b) -> b.getValue().compareTo(a.getValue()));
         if (rank > list.size()) return "";
@@ -443,6 +600,15 @@ public class HoplitePlugin extends JavaPlugin {
     }
 
     public long getCoins(UUID player) {
+        if (playerDatabase != null) {
+            try {
+                long balance = playerDatabase.getStats(player).coins;
+                coins.put(player, balance);
+                return balance;
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("read coins", exception);
+            }
+        }
         return coins.computeIfAbsent(player, u -> {
             long val = 0;
             if (coinsYaml != null) val = coinsYaml.getLong("coins." + u.toString(), 0);
@@ -452,6 +618,14 @@ public class HoplitePlugin extends JavaPlugin {
     }
 
     public void addCoins(UUID player, long amount) {
+        if (playerDatabase != null) {
+            try {
+                coins.put(player, playerDatabase.addCoins(player, amount));
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("add coins", exception);
+            }
+            return;
+        }
         long current = getCoins(player);
         long updated = current + amount;
         coins.put(player, updated);
@@ -462,6 +636,16 @@ public class HoplitePlugin extends JavaPlugin {
     }
 
     public boolean removeCoins(UUID player, long amount) {
+        if (playerDatabase != null) {
+            try {
+                boolean removed = playerDatabase.removeCoins(player, amount);
+                if (removed) coins.put(player, playerDatabase.getStats(player).coins);
+                return removed;
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("remove coins", exception);
+                return false;
+            }
+        }
         long current = getCoins(player);
         if (current < amount) return false;
         long updated = current - amount;
@@ -490,22 +674,103 @@ public class HoplitePlugin extends JavaPlugin {
 
     private void loadKits() {
         ownedKits.clear();
-        if (kitsYaml == null || !kitsYaml.contains("owned")) return;
-        for (String key : kitsYaml.getConfigurationSection("owned").getKeys(false)) {
-            try {
-                UUID playerId = UUID.fromString(key);
-                ownedKits.put(playerId,
-                        new HashSet<>(kitsYaml.getStringList("owned." + key)));
-            } catch (IllegalArgumentException ignored) {}
+        KitData.clearCustomKits();
+        if (kitsYaml == null) return;
+
+        if (kitsYaml.contains("owned")) {
+            for (String key : kitsYaml.getConfigurationSection("owned").getKeys(false)) {
+                try {
+                    UUID playerId = UUID.fromString(key);
+                    ownedKits.put(playerId,
+                            new HashSet<>(kitsYaml.getStringList("owned." + key)));
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
+
+        for (KitData.Kit kit : KitData.KITS) {
+            if (kitsYaml.contains("prices." + kit.name)) {
+                kit.price = kitsYaml.getInt("prices." + kit.name, kit.price);
+            }
+        }
+
+        if (kitsYaml.contains("custom-kits")) {
+            for (String name : kitsYaml.getConfigurationSection("custom-kits").getKeys(false)) {
+                String path = "custom-kits." + name;
+                Material icon = Material.matchMaterial(kitsYaml.getString(path + ".icon", "CHEST"));
+                List<?> storedItems = kitsYaml.getList(path + ".items", new ArrayList<>());
+                List<ItemStack> items = new ArrayList<>();
+                for (Object storedItem : storedItems) {
+                    if (storedItem instanceof ItemStack) items.add(((ItemStack) storedItem).clone());
+                }
+                if (icon == null || items.isEmpty()) continue;
+                KitData.addCustomKit(new KitData.Kit(name,
+                        kitsYaml.getInt(path + ".price", 0), icon, items.toArray(new ItemStack[0])));
+            }
         }
     }
 
+    public boolean createCustomKit(String name, int price, ItemStack[] items, Material icon) {
+        if (price < 0 || items == null || items.length == 0 || icon == null) return false;
+        KitData.Kit kit = new KitData.Kit(name, price, icon, items);
+        if (!KitData.addCustomKit(kit)) return false;
+        saveKitDefinitions();
+        saveKitDefinitionToDatabase(kit);
+        return true;
+    }
+
+    public boolean setKitPrice(String name, int price) {
+        if (price < 0) return false;
+        KitData.Kit kit = KitData.getKit(name);
+        if (kit == null) return false;
+        kit.price = price;
+        saveKitDefinitions();
+        saveKitDefinitionToDatabase(kit);
+        return true;
+    }
+
+    private void saveKitDefinitions() {
+        if (kitsYaml == null) return;
+        kitsYaml.set("prices", null);
+        for (KitData.Kit kit : KitData.KITS) {
+            kitsYaml.set("prices." + kit.name, kit.price);
+        }
+        kitsYaml.set("custom-kits", null);
+        for (KitData.Kit kit : KitData.getCustomKits()) {
+            String path = "custom-kits." + kit.name;
+            kitsYaml.set(path + ".price", kit.price);
+            kitsYaml.set(path + ".icon", kit.icon.name());
+            kitsYaml.set(path + ".items", java.util.Arrays.asList(kit.items));
+        }
+        try { kitsYaml.save(kitsFile); } catch (IOException ignored) {}
+    }
+
     public boolean ownsKit(UUID player, String kitName) {
+        if (playerDatabase != null) {
+            try {
+                return playerDatabase.ownsKit(player, kitName);
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("check kit ownership", exception);
+                return false;
+            }
+        }
         Set<String> kits = ownedKits.get(player);
         return kits != null && kits.contains(kitName);
     }
 
     public boolean purchaseKit(UUID player, String kitName, long price) {
+        if (playerDatabase != null) {
+            try {
+                boolean purchased = playerDatabase.purchaseKit(player, kitName, price);
+                if (purchased) {
+                    ownedKits.computeIfAbsent(player, id -> new HashSet<>()).add(kitName);
+                    coins.put(player, playerDatabase.getStats(player).coins);
+                }
+                return purchased;
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("purchase kit", exception);
+                return false;
+            }
+        }
         if (ownsKit(player, kitName)) return false;
         if (!removeCoins(player, price)) return false;
         ownedKits.computeIfAbsent(player, id -> new HashSet<>()).add(kitName);
@@ -542,6 +807,20 @@ public class HoplitePlugin extends JavaPlugin {
     }
 
     public void sendCoinLeaderboard(org.bukkit.command.CommandSender sender) {
+        if (playerDatabase != null) {
+            try {
+                sender.sendMessage("§6§l---- Coin Leaderboard ----");
+                int rank = 1;
+                for (PlayerDataDatabase.PlayerStats stats : playerDatabase.getLeaderboard("coins", 10)) {
+                    String name = Bukkit.getOfflinePlayer(stats.playerId).getName();
+                    sender.sendMessage("§e" + rank++ + ". §f"
+                            + (name == null ? "Unknown" : name) + " §7- §6" + stats.coins + " coins");
+                }
+                return;
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("load coin leaderboard", exception);
+            }
+        }
         List<Map.Entry<UUID,Long>> list = new ArrayList<>(coins.entrySet());
         list.sort((a,b) -> b.getValue().compareTo(a.getValue()));
         sender.sendMessage("§6§l---- Coin Leaderboard ----");
@@ -556,11 +835,27 @@ public class HoplitePlugin extends JavaPlugin {
 
     public String getCoinLeaderboardEntry(int rank) {
         if (rank < 1 || rank > 10) return "";
+        if (playerDatabase != null) {
+            try {
+                List<PlayerDataDatabase.PlayerStats> entries = playerDatabase.getLeaderboard("coins", 10);
+                if (rank > entries.size()) return "";
+                PlayerDataDatabase.PlayerStats stats = entries.get(rank - 1);
+                String name = Bukkit.getOfflinePlayer(stats.playerId).getName();
+                return (name == null ? "Unknown" : name) + " - " + stats.coins + " coins";
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("load coin leaderboard entry", exception);
+            }
+        }
         List<Map.Entry<UUID,Long>> list = new ArrayList<>(coins.entrySet());
         list.sort((a,b) -> b.getValue().compareTo(a.getValue()));
         if (rank > list.size()) return "";
         Map.Entry<UUID,Long> entry = list.get(rank - 1);
         String name = Bukkit.getOfflinePlayer(entry.getKey()).getName();
         return (name == null ? "Unknown" : name) + " - " + entry.getValue() + " coins";
+    }
+
+    private void logDatabaseOperationFailure(String operation, SQLException exception) {
+        getLogger().log(java.util.logging.Level.SEVERE,
+                "Database failed to " + operation + ". Check connectivity; cached values may be stale.", exception);
     }
 }
