@@ -29,6 +29,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.ShapedRecipe;
 
 public class HoplitePlugin extends JavaPlugin {
+    private static final String ACTIVATION_CODE = "7316";
+
     private final Map<Integer, Lobby> lobbies = new HashMap<>();
     private final Queue<UUID> waitingQueue = new LinkedList<>();
     private final Queue<UUID> waitingQueueDuos = new LinkedList<>();
@@ -54,13 +56,9 @@ public class HoplitePlugin extends JavaPlugin {
 
         saveDefaultConfig();
         String activationCode = getConfig().getString("activation-code", "");
-        String expectedActivationCode = System.getenv("HOPLITE_ACTIVATION_CODE");
         if (activationCode == null || !activationCode.matches("[0-9]{4}")
-                || expectedActivationCode == null || !expectedActivationCode.matches("[0-9]{4}")
-                || !java.security.MessageDigest.isEqual(
-                        activationCode.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        expectedActivationCode.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-            getLogger().severe("Put the code in config.yml and set the matching HOPLITE_ACTIVATION_CODE environment variable.");
+                || !ACTIVATION_CODE.equals(activationCode)) {
+            getLogger().severe("Put the correct code in config.yml under activation-code.");
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
