@@ -4,6 +4,7 @@
 # Each entry needs a lobbyWorld (must already exist on server)
 # and a corresponding gameWorld name (will be generated/removed automatically).
 # optional maxPlayers and minPlayers per lobby (defaults 10 and 5).
+# Center coordinates do not change either value; they only control the lobby's teleport location.
 
 lobbies:
   - lobbyWorld: qwait1

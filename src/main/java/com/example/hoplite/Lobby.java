@@ -48,9 +48,7 @@ public class Lobby {
     private BukkitTask compassEnableTask;
     private BukkitTask borderTask;
     private BukkitTask balloonTask;
-    private BukkitTask winnerExitTask;
     private BukkitTask worldDeleteTask;
-    private final Map<UUID, Integer> winnerReturnTicks = new HashMap<>();
 
     private static final class BalloonVisual {
         private final ArmorStand stand;
@@ -662,8 +660,23 @@ public class Lobby {
     }
 
     public synchronized void playerDied(UUID playerId) {
+        if (!activeGame) return;
         players.remove(playerId);
         checkForWinner();
+    }
+
+    public synchronized void keepPlayerInQueue(Player player) {
+        UUID playerId = player.getUniqueId();
+        if (activeGame) return;
+        players.add(playerId);
+        Location center = plugin.getLobbyCenter(id);
+        if (center != null) {
+            player.teleport(center);
+        } else {
+            World waitingWorld = Bukkit.getWorld(lobbyWorld);
+            if (waitingWorld != null) player.teleport(waitingWorld.getSpawnLocation());
+        }
+        player.setFallDistance(0);
     }
 
     public synchronized boolean isGracePeriod() {
@@ -816,9 +829,9 @@ public class Lobby {
         World lw = Bukkit.getWorld(lobbyWorld);
         for (UUID u : new HashSet<>(participants)) {
             plugin.disableTeamChat(u);
-            if (winners.contains(u)) continue;
             Player p = Bukkit.getPlayer(u);
             if (p != null && p.isOnline()) {
+                p.setFallDistance(0);
                 if (!plugin.teleportToPlayerSpawn(p) && lw != null) {
                     p.teleport(lw.getSpawnLocation());
                 }
@@ -832,63 +845,7 @@ public class Lobby {
         privatePartyMembers.clear();
         partyMatch = false;
 
-        if (winners.isEmpty()) {
-            deleteWorldWhenEmpty();
-        } else {
-            beginWinnerExit(winners);
-        }
-    }
-
-    private synchronized void beginWinnerExit(Set<UUID> winners) {
-        winnerReturnTicks.clear();
-        for (UUID winner : winners) winnerReturnTicks.put(winner, 0);
-        if (winnerExitTask != null) winnerExitTask.cancel();
-
-        winnerExitTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            synchronized (Lobby.this) {
-                World game = Bukkit.getWorld(gameWorld);
-                for (UUID winnerId : new HashSet<>(winnerReturnTicks.keySet())) {
-                    Player winner = Bukkit.getPlayer(winnerId);
-                    if (winner == null || !winner.isOnline() || game == null || winner.getWorld() != game) {
-                        if (winner != null && winner.isOnline()) {
-                            winner.clearTitle();
-                            clearPlayerInventory(winner);
-                        }
-                        winnerReturnTicks.remove(winnerId);
-                        continue;
-                    }
-
-                    int elapsedTicks = winnerReturnTicks.get(winnerId);
-                    if (elapsedTicks % 20 == 0) {
-                        winner.sendTitle("§a§lYOU WON!", "§eReturning to spawn...", 0, 40, 0);
-                    }
-                    if (elapsedTicks >= 100) {
-                        Location spawn = plugin.getPlayerSpawn();
-                        boolean teleported = spawn != null
-                                && !gameWorld.equals(spawn.getWorld().getName())
-                                && winner.teleport(spawn);
-                        if (!teleported && lwExistsOutsideGame()) {
-                            World waitingWorld = Bukkit.getWorld(lobbyWorld);
-                            teleported = waitingWorld != null
-                                    && winner.teleport(waitingWorld.getSpawnLocation());
-                        }
-                        if (teleported && winner.getWorld() != game) {
-                            winner.clearTitle();
-                            clearPlayerInventory(winner);
-                            winnerReturnTicks.remove(winnerId);
-                        }
-                    } else {
-                        winnerReturnTicks.put(winnerId, elapsedTicks + 5);
-                    }
-                }
-
-                if (winnerReturnTicks.isEmpty()) {
-                    winnerExitTask.cancel();
-                    winnerExitTask = null;
-                    deleteWorldWhenEmpty();
-                }
-            }
-        }, 0L, 5L);
+        deleteWorldWhenEmpty();
     }
 
     private boolean lwExistsOutsideGame() {
