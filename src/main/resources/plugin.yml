@@ -45,6 +45,9 @@ permissions:
   hoplite.lobbycenter:
     description: "Set queue lobby centers"
     default: op
+  hoplite.kit.admin:
+    description: "Create kits and edit kit prices"
+    default: op
   hoplite.command.bypass:
     description: "Bypass Hoplite allowed-command restrictions"
     default: op

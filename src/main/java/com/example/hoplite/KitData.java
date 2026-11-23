@@ -8,7 +8,9 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class KitData {
     public static class KitPotion {
@@ -23,6 +25,7 @@ public class KitData {
     }
 
     public static final List<Kit> KITS = new ArrayList<>();
+    private static final Set<String> CUSTOM_KIT_NAMES = new HashSet<>();
 
     static {
         // 1. Brawler's Blitz (2200-2800)
@@ -119,6 +122,37 @@ public class KitData {
         ));
     }
 
+    public static Kit getKit(String name) {
+        for (Kit kit : KITS) {
+            if (kit.name.equalsIgnoreCase(name)) return kit;
+        }
+        return null;
+    }
+
+    public static boolean addCustomKit(Kit kit) {
+        if (getKit(kit.name) != null) return false;
+        KITS.add(kit);
+        CUSTOM_KIT_NAMES.add(kit.name);
+        return true;
+    }
+
+    public static void clearCustomKits() {
+        KITS.removeIf(kit -> CUSTOM_KIT_NAMES.contains(kit.name));
+        CUSTOM_KIT_NAMES.clear();
+    }
+
+    public static boolean isCustomKit(Kit kit) {
+        return CUSTOM_KIT_NAMES.contains(kit.name);
+    }
+
+    public static List<Kit> getCustomKits() {
+        List<Kit> customKits = new ArrayList<>();
+        for (Kit kit : KITS) {
+            if (isCustomKit(kit)) customKits.add(kit);
+        }
+        return customKits;
+    }
+
     private static ItemStack item(Material mat, int amount) {
         return new ItemStack(mat, amount);
     }
@@ -131,7 +165,7 @@ public class KitData {
 
     public static class Kit {
         public final String name;
-        public final int price;
+        public int price;
         public final Material icon;
         public final ItemStack[] items;
         public final List<KitPotion> potions = new ArrayList<>();

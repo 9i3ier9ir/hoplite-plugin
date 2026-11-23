@@ -21,7 +21,26 @@ mvn clean package
 
 Copy `target/hoplite-plugin-1.21.0-SNAPSHOT.jar` into the server's `plugins/` directory, then start or restart the server. On first startup, the plugin creates its data folder and copies the default `config.yml` there. Edit `plugins/HoplitePlugin/config.yml` and restart the server to apply lobby changes.
 
-Player ELO and coin balances are stored in `plugins/HoplitePlugin/elo.yml` and `plugins/HoplitePlugin/coins.yml`.
+By default, player data is stored in `plugins/HoplitePlugin/elo.yml`, `coins.yml`, and `kits.yml`. To share player data across servers, configure the same MySQL/MariaDB database on each server as described below.
+
+## Shared MySQL/MariaDB Data
+
+Create the database on your MySQL or MariaDB server, then set the same `database` values in every server's `config.yml` and enable it:
+
+```yaml
+database:
+  enabled: true
+  host: db.example.net
+  port: 3306
+  name: hoplite
+  username: hoplite
+  password: replace-this
+  table-prefix: hoplite_
+```
+
+The plugin creates its tables automatically. Coins, ELO, kit ownership, kit definitions, and kit prices are read from and written to the shared database. Existing YAML data is imported for records not already present in the database. Keep database credentials private and use the same table prefix on all servers.
+
+When the database is disabled, the plugin continues to use its local YAML files. If the database cannot be reached during startup, the plugin logs an error and falls back to local YAML data for that server.
 
 ## Lobby Configuration
 
@@ -50,6 +69,8 @@ The default configuration contains ten lobbies, including two duo lobbies. Add o
 
 The plugin also saves a shared return spawn when an administrator uses `/hoplitesetspawn`. Queue leavers and match participants return to that location. If no spawn has been set, match participants return to their lobby world's spawn.
 
+Lobby centers are saved separately under `lobby-centers` in `config.yml`, so running `/lobbycenter <id>` does not alter the `lobbies` list or its player limits. `maxPlayers` and `minPlayers` remain independently editable on each lobby entry.
+
 ## Commands
 
 | Command | Description |
@@ -58,6 +79,7 @@ The plugin also saves a shared return spawn when an administrator uses `/hoplite
 | `/queue duos` or `/q duos` | Join an available duo lobby or the duo waiting queue. |
 | `/leaveq` | Leave a lobby or global waiting queue. |
 | `/hoplitesetspawn` | Set the shared return spawn to your current position and facing. |
+| `/lobbycenter <id>` | Save the current location as a queue lobby center. Requires `hoplite.lobbycenter`. |
 | `/party create` | Create a party. |
 | `/party invite <player>` | Invite an online player. Only the party owner can invite. |
 | `/party join <owner>` | Accept an outstanding invite from an online party owner. |
@@ -72,13 +94,15 @@ The plugin also saves a shared return spawn when an administrator uses `/hoplite
 | `/cbal` | Show your coin balance. |
 | `/cleader` | Show the top 10 coin leaderboard. |
 | `/coingive <player> <amount>` | Give coins to an online player. |
-| `/k` | Open the kits menu. Left-click a kit to buy it; right-click to preview it. |
+| `/k` | Open the kits menu. Left-click to buy/load a kit; right-click to preview it. |
+| `/k create <name> <coins>` | Create a permanent kit from your current inventory. Requires `hoplite.kit.admin`. |
+| `/k edit <name> <new-price>` | Change a kit's price. Requires `hoplite.kit.admin`. |
 
 Party invites and memberships are held in memory and are cleared when the server restarts. Party games require at least two online members, and all members must leave existing queues or matches before the owner can start one. The game reserves an empty lobby for the party, starts after 10 seconds, and does not allow other players to join. Party games do not award coins or ELO.
 
 ## Match Behavior
 
-When a game world is ready, the plugin selects a safe solid landing point for each player. Each player starts 130 blocks above and 50 blocks horizontally away from their target, riding a guided chicken. The chicken is removed on landing. Players cannot dismount during the drop and are protected from fall damage until they land.
+When a game world is ready, each player or duo team rides a visible hot-air balloon carrier for a 100-block route. Players can sneak to depart early and receive Slow Falling until they land or enter water.
 
 In regular matches, duo teammates are announced before the game starts and shown with green nametags during the match. Friendly fire between teammates is disabled. Active matches have a five-minute grace period and a world border that begins at 1,000 blocks and shrinks over time. After 10 minutes, players receive a compass that tracks the nearest opponent.
 
@@ -90,6 +114,8 @@ Normal-match kills award 5 coins, and match winners receive the configured in-ga
 | --- | --- | --- |
 | `hoplite.broadcast` | Use `/broadcast`. | Operators |
 | `hoplite.party.broadcast` | Use `/party broadcast`. | Operators |
+| `hoplite.lobbycenter` | Use `/lobbycenter <id>`. | Operators |
+| `hoplite.kit.admin` | Use `/k create` and `/k edit`. | Operators |
 
 Grant these nodes through your permissions plugin, for example LuckPerms. The party broadcast permission can be granted independently from the live broadcast permission.
 

@@ -99,7 +99,11 @@ public class HopliteCommand implements CommandExecutor {
                 handleCoinGive(p, args);
                 return true;
             case "k":
-                openKitMenu(p);
+                if (args.length == 0) {
+                    openKitMenu(p);
+                } else {
+                    handleKitManagement(p, args);
+                }
                 return true;
         }
         return false;
@@ -430,6 +434,7 @@ public class HopliteCommand implements CommandExecutor {
     }
 
     private void openKitMenu(Player p) {
+        plugin.refreshKitDefinitionsFromDatabase();
         // Check if player is in an active game
         for (Lobby l : plugin.getLobbies()) {
             if (l.hasPlayer(p.getUniqueId()) && l.isActiveGame()) {
@@ -457,6 +462,56 @@ public class HopliteCommand implements CommandExecutor {
             inv.setItem(i, is);
         }
         p.openInventory(inv);
+    }
+
+    private void handleKitManagement(Player player, String[] args) {
+        if (!player.hasPermission("hoplite.kit.admin")) {
+            player.sendMessage("§cYou do not have permission to manage kits.");
+            return;
+        }
+
+        if (args.length == 3 && args[0].equalsIgnoreCase("create")) {
+            String name = args[1].trim();
+            if (!name.matches("[A-Za-z0-9_-]+")) {
+                player.sendMessage("§eKit names may contain letters, numbers, underscores, and hyphens.");
+                return;
+            }
+            try {
+                int price = Integer.parseInt(args[2]);
+                List<ItemStack> kitItems = new ArrayList<>();
+                for (ItemStack item : player.getInventory().getStorageContents()) {
+                    if (item != null && item.getType() != Material.AIR) kitItems.add(item.clone());
+                }
+                ItemStack heldItem = player.getInventory().getItemInMainHand();
+                Material icon = heldItem.getType() == Material.AIR ? Material.CHEST : heldItem.getType();
+                if (kitItems.isEmpty()) {
+                    player.sendMessage("§cPut the kit items in your inventory before creating it.");
+                } else if (plugin.createCustomKit(name, price, kitItems.toArray(new ItemStack[0]), icon)) {
+                    player.sendMessage("§aCreated kit " + name + " for " + price + " coins.");
+                } else {
+                    player.sendMessage("§cCould not create kit. Check the price or whether the name already exists.");
+                }
+            } catch (NumberFormatException exception) {
+                player.sendMessage("§cKit price must be a whole number.");
+            }
+            return;
+        }
+
+        if (args.length == 3 && args[0].equalsIgnoreCase("edit")) {
+            try {
+                int price = Integer.parseInt(args[2]);
+                if (plugin.setKitPrice(args[1], price)) {
+                    player.sendMessage("§aUpdated " + args[1] + " to " + price + " coins.");
+                } else {
+                    player.sendMessage("§cKit not found or price is invalid.");
+                }
+            } catch (NumberFormatException exception) {
+                player.sendMessage("§cKit price must be a whole number.");
+            }
+            return;
+        }
+
+        player.sendMessage("§eUsage: /k create <name> <coins> or /k edit <name> <new-price>");
     }
 
     private void handleLeaveQ(Player p) {
