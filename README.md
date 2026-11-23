@@ -21,6 +21,8 @@ mvn clean package
 
 Copy `target/hoplite-plugin-1.21.0-SNAPSHOT.jar` into the server's `plugins/` directory, then start or restart the server. On first startup, the plugin creates its data folder and copies the default `config.yml` there. Edit `plugins/HoplitePlugin/config.yml` and restart the server to apply lobby changes.
 
+Set `activation-code` in `config.yml` to exactly four digits before enabling the plugin. If it is missing or malformed, Hoplite logs `Put the code in config.yml` and disables itself. This is a startup configuration gate, not a secure authentication or licensing mechanism; a code compiled into a distributed plugin cannot be kept secret.
+
 By default, player data is stored in `plugins/HoplitePlugin/elo.yml`, `coins.yml`, and `kits.yml`. To share player data across servers, configure the same MySQL/MariaDB database on each server as described below.
 
 ## Shared MySQL/MariaDB Data

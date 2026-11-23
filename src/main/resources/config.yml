@@ -6,6 +6,9 @@
 # optional maxPlayers and minPlayers per lobby (defaults 10 and 5).
 # Center coordinates do not change either value; they only control the lobby's teleport location.
 
+# Required to enable HoplitePlugin. Set this to exactly four digits.
+activation-code: ""
+
 lobbies:
   - lobbyWorld: qwait1
     id: 1
