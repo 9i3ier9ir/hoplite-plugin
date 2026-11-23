@@ -662,6 +662,8 @@ public class Lobby {
     public synchronized void playerDied(UUID playerId) {
         if (!activeGame) return;
         players.remove(playerId);
+        plugin.getWaitingQueue().remove(playerId);
+        plugin.getWaitingQueueDuos().remove(playerId);
         checkForWinner();
     }
 

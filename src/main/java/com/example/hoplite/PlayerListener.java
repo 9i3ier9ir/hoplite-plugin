@@ -154,6 +154,8 @@ public class PlayerListener implements Listener {
         for (Lobby lobby : plugin.getLobbies()) {
             if (lobby.isParticipant(p.getUniqueId()) && lobby.isActiveGame()) {
                 activeLobby = lobby;
+                plugin.getWaitingQueue().remove(p.getUniqueId());
+                plugin.getWaitingQueueDuos().remove(p.getUniqueId());
                 break;
             }
             if (!lobby.isActiveGame() && lobby.hasPlayer(p.getUniqueId())) {
