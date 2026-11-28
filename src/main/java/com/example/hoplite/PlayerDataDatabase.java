@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.time.LocalDate;
 
 public final class PlayerDataDatabase implements AutoCloseable {
     public static final class PlayerStats {
@@ -48,6 +49,7 @@ public final class PlayerDataDatabase implements AutoCloseable {
     private final String statsTable;
     private final String kitsTable;
     private final String definitionsTable;
+    private final String questsTable;
 
     public PlayerDataDatabase(String host, int port, String database, String username, String password,
                               String tablePrefix) throws SQLException {
@@ -57,6 +59,7 @@ public final class PlayerDataDatabase implements AutoCloseable {
         statsTable = tablePrefix + "player_data";
         kitsTable = tablePrefix + "player_kits";
         definitionsTable = tablePrefix + "kit_definitions";
+        questsTable = tablePrefix + "player_quests";
 
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl("jdbc:mariadb://" + host + ":" + port + "/" + database
@@ -95,6 +98,14 @@ public final class PlayerDataDatabase implements AutoCloseable {
                     + "icon VARCHAR(64) NOT NULL,"
                     + "items_yaml LONGTEXT NOT NULL,"
                     + "is_custom BOOLEAN NOT NULL"
+                    + ") ENGINE=InnoDB");
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS " + questsTable + " ("
+                    + "player_uuid CHAR(36) NOT NULL,"
+                    + "quest_id VARCHAR(32) NOT NULL,"
+                    + "quest_date DATE NOT NULL,"
+                    + "progress INT NOT NULL DEFAULT 0,"
+                    + "is_completed BOOLEAN NOT NULL DEFAULT FALSE,"
+                    + "PRIMARY KEY (player_uuid, quest_id)"
                     + ") ENGINE=InnoDB");
         }
     }
@@ -211,6 +222,108 @@ public final class PlayerDataDatabase implements AutoCloseable {
             statement.executeUpdate();
         }
         return getStats(playerId).coins;
+    }
+
+    public QuestManager.Progress getQuestProgress(UUID playerId, String questId, LocalDate today)
+            throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT quest_date, progress, is_completed FROM " + questsTable
+                             + " WHERE player_uuid = ? AND quest_id = ?")) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, questId);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next() || !today.equals(result.getDate("quest_date").toLocalDate())) {
+                    return new QuestManager.Progress(0, false, false, 0);
+                }
+                return new QuestManager.Progress(result.getInt("progress"),
+                        result.getBoolean("is_completed"), false, 0);
+            }
+        }
+    }
+
+    public QuestManager.Progress advanceQuest(UUID playerId, String questId, LocalDate today,
+                                              int increment, int goal, long reward) throws SQLException {
+        ensurePlayer(playerId);
+        try (Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                try (PreparedStatement insert = connection.prepareStatement(
+                        "INSERT IGNORE INTO " + questsTable
+                                + " (player_uuid, quest_id, quest_date, progress, is_completed)"
+                                + " VALUES (?, ?, ?, 0, FALSE)")) {
+                    insert.setString(1, playerId.toString());
+                    insert.setString(2, questId);
+                    insert.setDate(3, java.sql.Date.valueOf(today));
+                    insert.executeUpdate();
+                }
+
+                int progress;
+                boolean completed;
+                LocalDate storedDate;
+                try (PreparedStatement select = connection.prepareStatement(
+                        "SELECT quest_date, progress, is_completed FROM " + questsTable
+                                + " WHERE player_uuid = ? AND quest_id = ? FOR UPDATE")) {
+                    select.setString(1, playerId.toString());
+                    select.setString(2, questId);
+                    try (ResultSet result = select.executeQuery()) {
+                        if (!result.next()) throw new SQLException("Quest progress row was not created.");
+                        storedDate = result.getDate("quest_date").toLocalDate();
+                        progress = result.getInt("progress");
+                        completed = result.getBoolean("is_completed");
+                    }
+                }
+
+                if (!today.equals(storedDate)) {
+                    progress = 0;
+                    completed = false;
+                }
+                boolean newlyCompleted = false;
+                if (!completed) {
+                    progress = Math.min(goal, progress + increment);
+                    completed = progress >= goal;
+                    newlyCompleted = completed;
+                }
+
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE " + questsTable
+                                + " SET quest_date = ?, progress = ?, is_completed = ?"
+                                + " WHERE player_uuid = ? AND quest_id = ?")) {
+                    update.setDate(1, java.sql.Date.valueOf(today));
+                    update.setInt(2, progress);
+                    update.setBoolean(3, completed);
+                    update.setString(4, playerId.toString());
+                    update.setString(5, questId);
+                    update.executeUpdate();
+                }
+
+                long coinBalance = 0;
+                if (newlyCompleted) {
+                    try (PreparedStatement updateCoins = connection.prepareStatement(
+                            "UPDATE " + statsTable + " SET coins = coins + ? WHERE player_uuid = ?")) {
+                        updateCoins.setLong(1, reward);
+                        updateCoins.setString(2, playerId.toString());
+                        updateCoins.executeUpdate();
+                    }
+                    try (PreparedStatement selectCoins = connection.prepareStatement(
+                            "SELECT coins FROM " + statsTable + " WHERE player_uuid = ?")) {
+                        selectCoins.setString(1, playerId.toString());
+                        try (ResultSet result = selectCoins.executeQuery()) {
+                            if (!result.next()) throw new SQLException("Player coin balance was not found.");
+                            coinBalance = result.getLong("coins");
+                        }
+                    }
+                }
+
+                connection.commit();
+                return new QuestManager.Progress(progress, completed, newlyCompleted, coinBalance);
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        }
     }
 
     public boolean removeCoins(UUID playerId, long amount) throws SQLException {

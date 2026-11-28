@@ -65,9 +65,9 @@ lobbies:
 - `minPlayers`: Number of players required to start its regular countdown.
 - `mode`: Set to `duos` to make the lobby available to `/queue duos`. Omit it for singles.
 
-The default configuration contains ten lobbies, including two duo lobbies. Add or remove list entries as needed; ensure each waiting world exists and each game-world name is unique. Regular lobbies start a 60-second countdown at their minimum player count, with warnings at 30 and 10 seconds. A full lobby starts in 10 seconds. Players who cannot enter a lobby are added to the relevant global waiting queue; use `/leaveq` to leave it.
+The default configuration contains ten lobbies, including two duo lobbies. Add or remove list entries as needed; ensure each waiting world exists and each game-world name is unique. Regular lobbies start a 60-second countdown at their minimum player count, with a warning at 30 seconds and a large, audible 10-to-0 countdown before the match starts. A full lobby starts its 10-to-0 countdown immediately. Players who cannot enter a lobby are added to the relevant global waiting queue; use `/leaveq` to leave it.
 
-The plugin also saves a shared return spawn when an administrator uses `/hoplitesetspawn`. Queue leavers and match participants return to that location. If no spawn has been set, match participants return to their lobby world's spawn.
+The plugin also saves a shared return spawn when an administrator uses `/hoplitesetspawn`. Queue leavers and match participants return to that location. Match winners see a large green `YOU WON` title and stay in the game world for five seconds before returning. If no spawn has been set, match participants return to their lobby world's spawn.
 
 Lobby centers are saved separately under `lobby-centers` in `config.yml`, so running `/lobbycenter <id>` does not alter the `lobbies` list or its player limits. `maxPlayers` and `minPlayers` remain independently editable on each lobby entry.
 
@@ -94,6 +94,7 @@ Lobby centers are saved separately under `lobby-centers` in `config.yml`, so run
 | `/cbal` | Show your coin balance. |
 | `/cleader` | Show the top 10 coin leaderboard. |
 | `/coingive <player> <amount>` | Give coins to an online player. |
+| `/quests [all\|completed\|incomplete]` | View daily quests, progress, and coin rewards; filter by completion status. |
 | `/k` | Open the kits menu. Left-click to buy/load a kit; right-click to preview it. |
 | `/k create <name> <coins>` | Create a permanent kit from your current inventory. Requires `hoplite.kit.admin`. |
 | `/k edit <name> <new-price>` | Change a kit's price. Requires `hoplite.kit.admin`. |
@@ -104,9 +105,13 @@ Party invites and memberships are held in memory and are cleared when the server
 
 When a game world is ready, each player or duo team rides a visible hot-air balloon carrier for a 100-block route. Players can sneak to depart early and receive Slow Falling until they land or enter water.
 
-In regular matches, duo teammates are announced before the game starts and shown with green nametags during the match. Friendly fire between teammates is disabled. Active matches have a five-minute grace period and a world border that begins at 1,000 blocks and shrinks over time. After 10 minutes, players receive a compass that tracks the nearest opponent.
+In regular matches, duo teammates are announced before the game starts and shown with green nametags during the match. Friendly fire between teammates is disabled. Active matches have a five-minute grace period and a world border that begins at 1,000 blocks and shrinks over time. A mace is placed in a chest at a random location inside the border; after a random 5–7 minutes, active players see its coordinates in chat and on screen. After 10 minutes, players receive a compass that tracks the nearest opponent.
+
+Command access is controlled by the `allowed-commands` lists in `config.yml`. `game`, `queue`, and `lobby` each have a separate allowlist for non-operators; operators can run any command. Add command names without `/`, and add aliases separately if you want to allow them. The defaults allow `teamchat` and `quests` in matches, `leaveq` and `quests` in the global queue, and `leaveq`, `party`, and `quests` in waiting lobbies.
 
 Normal-match kills award 5 coins, and match winners receive the configured in-game awards handled by the plugin. These awards are disabled in private party matches.
+
+Daily quests reset at midnight UTC and award coins when completed: win a match (50), get 5 kills (25), play 3 matches (20), get 10 kills (50), and pick up the event Mace (40). Quest progress is stored with shared player data when MySQL/MariaDB is enabled, or in `plugins/HoplitePlugin/quests.yml` otherwise. Private party matches do not count toward quests.
 
 ## Permissions
 

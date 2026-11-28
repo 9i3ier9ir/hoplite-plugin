@@ -88,16 +88,19 @@ database:
   password: change-me
   table-prefix: hoplite_
 
-# Commands players may use while in each Hoplite state.
-# Add command names without the leading slash.
+# Each list is the exact set of commands allowed in that state for non-operators.
+# Operators can run any command. List command names without /.
 allowed-commands:
+  game:
+    - teamchat
+    - quests
+  queue:
+    - leaveq
+    - quests
   lobby:
     - leaveq
     - party
-  queue:
-    - leaveq
-  game:
-    - teamchat
+    - quests
 
 # elo values are stored automatically under the "elo" section
 
