@@ -18,6 +18,7 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.sql.SQLException;
 
 public class HopliteCommand implements CommandExecutor {
     private final HoplitePlugin plugin;
@@ -95,6 +96,9 @@ public class HopliteCommand implements CommandExecutor {
             case "cleader":
                 plugin.sendCoinLeaderboard(sender);
                 return true;
+            case "quests":
+                handleQuests(p, args);
+                return true;
             case "coingive":
                 handleCoinGive(p, args);
                 return true;
@@ -107,6 +111,42 @@ public class HopliteCommand implements CommandExecutor {
                 return true;
         }
         return false;
+    }
+
+    private void handleQuests(Player player, String[] args) {
+        if (args.length > 1) {
+            player.sendMessage("§eUsage: /quests [all|completed|incomplete]");
+            return;
+        }
+
+        String filter = args.length == 0 ? "all" : args[0].toLowerCase(java.util.Locale.ROOT);
+        if (filter.equals("done")) filter = "completed";
+        if (filter.equals("todo")) filter = "incomplete";
+        if (!filter.equals("all") && !filter.equals("completed") && !filter.equals("incomplete")) {
+            player.sendMessage("§eUsage: /quests [all|completed|incomplete]");
+            return;
+        }
+
+        player.sendMessage("§6§lDaily Quests §7(" + filter + ")");
+        int shown = 0;
+        try {
+            for (QuestManager.Quest quest : QuestManager.getDailyQuests()) {
+                QuestManager.Progress progress = plugin.getQuestProgress(player.getUniqueId(), quest);
+                if (filter.equals("completed") && !progress.isCompleted()) continue;
+                if (filter.equals("incomplete") && progress.isCompleted()) continue;
+                String status = progress.isCompleted() ? "§a✓ Completed" : "§e○ Incomplete";
+                player.sendMessage(status + " §f" + quest.getDescription()
+                        + " §7(" + progress.getProgress() + "/" + quest.getGoal() + ")"
+                        + " §6Reward: " + quest.getReward() + " coins");
+                shown++;
+            }
+        } catch (SQLException exception) {
+            plugin.getLogger().log(java.util.logging.Level.SEVERE, "Could not load daily quest progress.", exception);
+            player.sendMessage("§cQuest progress could not be loaded. Please try again later.");
+            return;
+        }
+        if (shown == 0) player.sendMessage("§7No quests match that filter.");
+        player.sendMessage("§7Use /quests [all|completed|incomplete] to filter.");
     }
 
     private void handleBroadcast(CommandSender sender, String[] args) {

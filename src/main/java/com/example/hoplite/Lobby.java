@@ -4,6 +4,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.ArmorStand;
@@ -18,6 +19,7 @@ import org.bukkit.scoreboard.Team;
 import org.bukkit.util.Vector;
 
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class Lobby {
     private final HoplitePlugin plugin;
@@ -48,6 +50,7 @@ public class Lobby {
     private BukkitTask compassEnableTask;
     private BukkitTask borderTask;
     private BukkitTask balloonTask;
+    private BukkitTask maceAnnouncementTask;
     private BukkitTask worldDeleteTask;
 
     private static final class BalloonVisual {
@@ -138,6 +141,16 @@ public class Lobby {
         }
     }
 
+    private synchronized void showStartCountdown(int seconds) {
+        for (UUID playerId : new HashSet<>(players)) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline()) {
+                player.sendTitle("§e§l" + seconds, "§7Game starts in...", 0, 20, 0);
+                player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1.0f, 1.0f);
+            }
+        }
+    }
+
     public synchronized boolean addPlayer(Player p) {
         UUID playerId = p.getUniqueId();
         if (players.contains(playerId)) return true;
@@ -215,12 +228,14 @@ public class Lobby {
         countdownTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             timeLeft--;
             if (timeLeft == 30) sendLobbyMessage("§e30 seconds until the game starts.");
-            if (timeLeft == 10) sendLobbyMessage("§e10 seconds until the game starts.");
+            if (timeLeft <= 10 && timeLeft >= 0) showStartCountdown(timeLeft);
             if (timeLeft == 10 && "duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
             if (timeLeft <= 0) {
                 countdownTask.cancel();
-                countdownTask = null;
-                startGame();
+                countdownTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    countdownTask = null;
+                    startGame();
+                }, 20L);
             }
         }, 20L, 20L);
         sendLobbyMessage("§eYour lobby countdown started: 60 seconds.");
@@ -231,20 +246,16 @@ public class Lobby {
         timeLeft = 10;
         countdownTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             timeLeft--;
+            if (timeLeft >= 0) showStartCountdown(timeLeft);
             if (timeLeft == 0) {
                 countdownTask.cancel();
-                countdownTask = null;
-                startGame();
+                countdownTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    countdownTask = null;
+                    startGame();
+                }, 20L);
             }
         }, 20L, 20L);
-        if (partyMatch) {
-            for (UUID member : privatePartyMembers) {
-                Player player = Bukkit.getPlayer(member);
-                if (player != null) player.sendMessage("§eYour party game starts in 10 seconds.");
-            }
-        } else {
-            sendLobbyMessage("§eYour lobby is full. The game starts in 10 seconds.");
-        }
+        showStartCountdown(10);
         if ("duos".equalsIgnoreCase(mode)) assignDuosAndNotify();
     }
 
@@ -311,13 +322,24 @@ public class Lobby {
                     center == null ? 0 : center.getZ());
             gw.getWorldBorder().setSize(1000.0);
 
-            Bukkit.getScheduler().runTask(plugin, () -> ChestSpawner.populate(gw, 50));
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (!activeGame) return;
+                ChestSpawner.populate(gw, 50);
+                Location maceChest = ChestSpawner.spawnMaceChest(gw);
+                if (maceChest == null) return;
+                long delayTicks = ThreadLocalRandom.current().nextLong(5L * 60 * 20, 7L * 60 * 20 + 1);
+                maceAnnouncementTask = Bukkit.getScheduler().runTaskLater(
+                        plugin, () -> announceMaceLocation(maceChest), delayTicks);
+            });
 
             for (UUID u : new HashSet<>(players)) {
                 Player player = Bukkit.getPlayer(u);
                 if (player != null && player.isOnline()) {
                     clearPlayerInventory(player);
                     plugin.grantPendingKit(player);
+                    if (!partyMatch) {
+                        plugin.progressQuest(u, "play_3", 1);
+                    }
                 }
             }
             startBalloonDrops(gw);
@@ -378,6 +400,21 @@ public class Lobby {
                 assigned.add(teammate);
             }
             beginBalloonDrop(team, world);
+        }
+    }
+
+    private synchronized void announceMaceLocation(Location maceChest) {
+        maceAnnouncementTask = null;
+        if (!activeGame) return;
+
+        String coordinates = maceChest.getBlockX() + ", "
+                + maceChest.getBlockY() + ", " + maceChest.getBlockZ();
+        sendLobbyMessage("§6§lTHE MACE IS AT (" + coordinates + ") GO GET IT BEFORE THE BORDER CLOSES!");
+        for (UUID playerId : new HashSet<>(players)) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null && player.isOnline()) {
+                player.sendTitle("§6§lTHE MACE IS AT", "§e" + coordinates + " - GO GET IT!", 10, 100, 10);
+            }
         }
     }
 
@@ -716,6 +753,8 @@ public class Lobby {
         Player k = Bukkit.getPlayer(killer);
         if (k != null && !partyMatch) {
             plugin.addCoins(killer, 5);
+            plugin.progressQuest(killer, "kill_5", 1);
+            plugin.progressQuest(killer, "kill_10", 1);
         }
     }
 
@@ -768,6 +807,7 @@ public class Lobby {
                         }
                     }
                 }
+                recordMatchWins(winnerIds);
                 endGame(winnerIds);
             }
         } else {
@@ -784,8 +824,24 @@ public class Lobby {
                     UUID winnerId = remaining.get(0).getUniqueId();
                     plugin.adjustEloAfterMatch(participants, winnerId);
                 }
+                recordMatchWins(winnerIds);
                 endGame(winnerIds);
             }
+        }
+    }
+
+    private void recordMatchWins(Set<UUID> winners) {
+        if (partyMatch || winners.isEmpty()) return;
+
+        Set<UUID> matchWinners = new HashSet<>(winners);
+        if ("duos".equalsIgnoreCase(mode)) {
+            for (UUID winner : winners) {
+                UUID teammate = teammates.get(winner);
+                if (teammate != null && participants.contains(teammate)) matchWinners.add(teammate);
+            }
+        }
+        for (UUID winner : matchWinners) {
+            plugin.progressQuest(winner, "win_match", 1);
         }
     }
 
@@ -815,6 +871,10 @@ public class Lobby {
             borderTask.cancel();
             borderTask = null;
         }
+        if (maceAnnouncementTask != null) {
+            maceAnnouncementTask.cancel();
+            maceAnnouncementTask = null;
+        }
         if (graceEndTask != null) {
             graceEndTask.cancel();
             graceEndTask = null;
@@ -834,8 +894,22 @@ public class Lobby {
             Player p = Bukkit.getPlayer(u);
             if (p != null && p.isOnline()) {
                 p.setFallDistance(0);
-                if (!plugin.teleportToPlayerSpawn(p) && lw != null) {
-                    p.teleport(lw.getSpawnLocation());
+                if (winners.contains(u)) {
+                    p.sendTitle("§a§lYOU WON", "", 0, 100, 10);
+                    p.playSound(p.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        Player winner = Bukkit.getPlayer(u);
+                        if (winner != null && winner.isOnline()) {
+                            if (!plugin.teleportToPlayerSpawn(winner) && lw != null) {
+                                winner.teleport(lw.getSpawnLocation());
+                            }
+                            winner.setFallDistance(0);
+                        }
+                    }, 100L);
+                } else {
+                    if (!plugin.teleportToPlayerSpawn(p) && lw != null) {
+                        p.teleport(lw.getSpawnLocation());
+                    }
                 }
                 clearPlayerInventory(p);
             }

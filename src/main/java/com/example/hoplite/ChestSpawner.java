@@ -4,6 +4,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
 import org.bukkit.inventory.Inventory;
@@ -36,6 +37,29 @@ public class ChestSpawner {
             Rarity r = pickRarity();
             spawnChest(world, r);
         }
+    }
+
+    public static Location spawnMaceChest(World world) {
+        Material mace = Material.matchMaterial("MACE");
+        if (mace == null) {
+            Bukkit.getLogger().severe("[Hoplite] Cannot spawn the match mace: this server does not support MACE.");
+            return null;
+        }
+
+        WorldBorder border = world.getWorldBorder();
+        Location center = border.getCenter();
+        double radius = Math.max(1.0, border.getSize() / 2.0 - 16.0);
+        double angle = RANDOM.nextDouble() * Math.PI * 2.0;
+        double distance = Math.sqrt(RANDOM.nextDouble()) * radius;
+        int x = (int) Math.floor(center.getX() + Math.cos(angle) * distance);
+        int z = (int) Math.floor(center.getZ() + Math.sin(angle) * distance);
+        int y = world.getHighestBlockYAt(x, z) + 1;
+
+        Block block = world.getBlockAt(x, y, z);
+        block.setType(Material.CHEST);
+        Chest chest = (Chest) block.getState();
+        chest.getBlockInventory().setItem(13, new ItemStack(mace));
+        return block.getLocation();
     }
 
     private static Rarity pickRarity() {

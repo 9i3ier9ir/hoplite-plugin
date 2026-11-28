@@ -36,6 +36,8 @@ commands:
     description: "Display the coin leaderboard (top 10)"
   coingive:
     description: "Give coins to another player"
+  quests:
+    description: "View daily quests and their coin rewards"
   k:
     description: "Open the kits menu to purchase kits"
 permissions:
@@ -47,9 +49,6 @@ permissions:
     default: op
   hoplite.kit.admin:
     description: "Create kits and edit kit prices"
-    default: op
-  hoplite.command.bypass:
-    description: "Bypass Hoplite allowed-command restrictions"
     default: op
   hoplite.broadcast:
     description: "Broadcast a live stream announcement"

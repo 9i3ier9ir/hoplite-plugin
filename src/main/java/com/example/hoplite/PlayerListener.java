@@ -4,6 +4,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
@@ -15,16 +16,20 @@ import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.block.Block;
 import org.bukkit.Material;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 
 public class PlayerListener implements Listener {
     private final HoplitePlugin plugin;
+    private final Map<UUID, Location> pendingMatchRespawns = new HashMap<>();
 
     public PlayerListener(HoplitePlugin plugin) {
         this.plugin = plugin;
@@ -40,6 +45,7 @@ public class PlayerListener implements Listener {
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent e) {
         Player p = e.getPlayer();
+        pendingMatchRespawns.remove(p.getUniqueId());
         plugin.disableTeamChat(p.getUniqueId());
         plugin.clearPendingKit(p.getUniqueId());
         for (Lobby l : plugin.getLobbies()) l.cancelBalloonDrop(p.getUniqueId());
@@ -82,7 +88,7 @@ public class PlayerListener implements Listener {
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerCommand(PlayerCommandPreprocessEvent e) {
         Player p = e.getPlayer();
         String[] commandParts = e.getMessage().trim().split("\\s+", 2);
@@ -107,10 +113,9 @@ public class PlayerListener implements Listener {
             state = "queue";
         }
 
-        if (state != null && !plugin.isCommandAllowed(state, rootCommand)
-                && !p.hasPermission("hoplite.command.bypass")) {
+        if (state != null && !plugin.isCommandAllowed(state, rootCommand) && !p.isOp()) {
             e.setCancelled(true);
-            p.sendMessage("§cYou cannot use that command in " + state + ".");
+            p.sendMessage("§cThat command is not allowed while you are in " + state + ".");
         }
     }
 
@@ -140,6 +145,13 @@ public class PlayerListener implements Listener {
         for (Lobby lobby : plugin.getLobbies()) {
             if (!lobby.hasPlayer(p.getUniqueId())) continue;
             if (lobby.isActiveGame()) {
+                Player killer = p.getKiller();
+                if (killer != null && !killer.getUniqueId().equals(p.getUniqueId())
+                        && lobby.hasPlayer(killer.getUniqueId())) {
+                    lobby.recordKill(killer.getUniqueId());
+                }
+                Location spawn = plugin.getPlayerSpawn();
+                if (spawn != null) pendingMatchRespawns.put(p.getUniqueId(), spawn.clone());
                 lobby.playerDied(p.getUniqueId());
             } else {
                 lobby.keepPlayerInQueue(p);
@@ -147,9 +159,31 @@ public class PlayerListener implements Listener {
         }
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onMacePickup(EntityPickupItemEvent e) {
+        if (!(e.getEntity() instanceof Player)) return;
+        Player player = (Player) e.getEntity();
+        if (!"MACE".equals(e.getItem().getItemStack().getType().name())) return;
+
+        for (Lobby lobby : plugin.getLobbies()) {
+            if (lobby.isActiveGame() && lobby.hasPlayer(player.getUniqueId())
+                    && lobby.getGameWorld().equals(player.getWorld().getName())) {
+                plugin.progressQuest(player.getUniqueId(), "get_mace", 1);
+                return;
+            }
+        }
+    }
+
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent e) {
         Player p = e.getPlayer();
+        Location pendingSpawn = pendingMatchRespawns.remove(p.getUniqueId());
+        if (pendingSpawn != null) {
+            e.setRespawnLocation(pendingSpawn);
+            p.setFallDistance(0);
+            return;
+        }
+
         Lobby activeLobby = null;
         for (Lobby lobby : plugin.getLobbies()) {
             if (lobby.isParticipant(p.getUniqueId()) && lobby.isActiveGame()) {

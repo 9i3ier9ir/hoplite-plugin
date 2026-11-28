@@ -18,6 +18,8 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.LinkedHashSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.io.File;
 import java.sql.SQLException;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -43,9 +45,11 @@ public class HoplitePlugin extends JavaPlugin {
     private File eloFile;
     private File coinsFile;
     private File kitsFile;
+    private File questsFile;
     private YamlConfiguration eloYaml;
     private YamlConfiguration coinsYaml;
     private YamlConfiguration kitsYaml;
+    private YamlConfiguration questsYaml;
     private PlayerDataDatabase playerDatabase;
 
     @Override
@@ -93,6 +97,7 @@ public class HoplitePlugin extends JavaPlugin {
         getCommand("broadcast").setExecutor(executor);
         getCommand("party").setExecutor(executor);
         getCommand("hoplitereload").setExecutor(executor);
+        getCommand("quests").setExecutor(executor);
 
         if (getServer().getPluginManager().getPlugin("PlaceholderAPI") == null) {
             getLogger().info("PlaceholderAPI not found; skipping PlaceholderAPI expansion.");
@@ -316,6 +321,9 @@ public class HoplitePlugin extends JavaPlugin {
         String normalizedState = state.toLowerCase(java.util.Locale.ROOT);
         String normalizedCommand = command.toLowerCase(java.util.Locale.ROOT);
         List<String> allowed = getConfig().getStringList("allowed-commands." + normalizedState);
+        if (allowed.isEmpty() && normalizedState.equals("game")) {
+            allowed = getConfig().getStringList("allowed-commands.ingame");
+        }
         if (allowed.isEmpty()) {
             allowed = getConfig().getStringList("allowed_commands." + normalizedState);
         }
@@ -631,8 +639,125 @@ public class HoplitePlugin extends JavaPlugin {
         coins.put(player, updated);
         if (coinsYaml != null) {
             coinsYaml.set("coins." + player.toString(), updated);
-            try { coinsYaml.save(coinsFile); } catch (IOException ignored) {}
+            try {
+                coinsYaml.save(coinsFile);
+            } catch (IOException exception) {
+                getLogger().log(java.util.logging.Level.SEVERE, "Could not save player coin balance.", exception);
+            }
         }
+    }
+
+    private boolean addQuestCoins(UUID player, long amount) {
+        long current = getCoins(player);
+        long updated = current + amount;
+        if (coinsYaml == null) {
+            coins.put(player, updated);
+            return true;
+        }
+
+        coinsYaml.set("coins." + player, updated);
+        try {
+            coinsYaml.save(coinsFile);
+            coins.put(player, updated);
+            return true;
+        } catch (IOException exception) {
+            coinsYaml.set("coins." + player, current);
+            getLogger().log(java.util.logging.Level.SEVERE, "Could not save quest coin reward.", exception);
+            return false;
+        }
+    }
+
+    public QuestManager.Progress getQuestProgress(UUID player, QuestManager.Quest quest) throws SQLException {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        if (playerDatabase != null) {
+            return playerDatabase.getQuestProgress(player, quest.getId(), today);
+        }
+
+        String path = "players." + player + "." + quest.getId();
+        if (!today.toString().equals(questsYaml.getString(path + ".date"))) {
+            return new QuestManager.Progress(0, false, false, 0);
+        }
+        int progress = questsYaml.getInt(path + ".progress", 0);
+        return new QuestManager.Progress(progress, questsYaml.getBoolean(path + ".completed"), false, 0);
+    }
+
+    public void progressQuest(UUID player, QuestManager.Quest quest, int increment) {
+        if (increment <= 0) return;
+
+        QuestManager.Progress updated;
+        if (playerDatabase != null) {
+            try {
+                updated = playerDatabase.advanceQuest(player, quest.getId(), LocalDate.now(ZoneOffset.UTC),
+                        increment, quest.getGoal(), quest.getReward());
+            } catch (SQLException exception) {
+                logDatabaseOperationFailure("update daily quest progress", exception);
+                Player onlinePlayer = Bukkit.getPlayer(player);
+                if (onlinePlayer != null) onlinePlayer.sendMessage("§cYour quest progress could not be saved.");
+                return;
+            }
+            if (updated.isNewlyCompleted()) coins.put(player, updated.getCoinBalance());
+        } else {
+            LocalDate today = LocalDate.now(ZoneOffset.UTC);
+            String path = "players." + player + "." + quest.getId();
+            String previousDate = questsYaml.getString(path + ".date");
+            int previousProgress = questsYaml.getInt(path + ".progress", 0);
+            boolean previousCompleted = questsYaml.getBoolean(path + ".completed", false);
+            int currentProgress = today.toString().equals(previousDate) ? previousProgress : 0;
+            boolean currentCompleted = today.toString().equals(previousDate) && previousCompleted;
+            if (currentCompleted) return;
+
+            int progress = Math.min(quest.getGoal(), currentProgress + increment);
+            boolean completed = progress >= quest.getGoal();
+            questsYaml.set(path + ".date", today.toString());
+            questsYaml.set(path + ".progress", progress);
+            questsYaml.set(path + ".completed", completed);
+            try {
+                questsYaml.save(questsFile);
+            } catch (IOException exception) {
+                restoreQuestProgress(path, previousDate, previousProgress, previousCompleted);
+                getLogger().log(java.util.logging.Level.SEVERE, "Could not save daily quest progress.", exception);
+                Player onlinePlayer = Bukkit.getPlayer(player);
+                if (onlinePlayer != null) onlinePlayer.sendMessage("§cYour quest progress could not be saved.");
+                return;
+            }
+
+            if (completed && !addQuestCoins(player, quest.getReward())) {
+                restoreQuestProgress(path, previousDate, previousProgress, previousCompleted);
+                Player onlinePlayer = Bukkit.getPlayer(player);
+                if (onlinePlayer != null) onlinePlayer.sendMessage("§cYour quest reward could not be saved.");
+                return;
+            }
+            updated = new QuestManager.Progress(progress, completed, completed, 0);
+        }
+
+        if (updated.isNewlyCompleted()) {
+            Player onlinePlayer = Bukkit.getPlayer(player);
+            if (onlinePlayer != null) {
+                onlinePlayer.sendMessage("§aDaily quest completed: §f" + quest.getDescription()
+                        + " §7(+" + quest.getReward() + " coins)");
+            }
+        }
+    }
+
+    private void restoreQuestProgress(String path, String date, int progress, boolean completed) {
+        if (date == null) {
+            questsYaml.set(path, null);
+        } else {
+            questsYaml.set(path + ".date", date);
+            questsYaml.set(path + ".progress", progress);
+            questsYaml.set(path + ".completed", completed);
+        }
+        try {
+            questsYaml.save(questsFile);
+        } catch (IOException exception) {
+            getLogger().log(java.util.logging.Level.SEVERE, "Could not roll back daily quest progress.", exception);
+        }
+    }
+
+    public void progressQuest(UUID player, String questId, int increment) {
+        QuestManager.Quest quest = QuestManager.getQuest(questId);
+        if (quest == null) throw new IllegalArgumentException("Unknown quest: " + questId);
+        progressQuest(player, quest, increment);
     }
 
     public boolean removeCoins(UUID player, long amount) {
@@ -662,14 +787,17 @@ public class HoplitePlugin extends JavaPlugin {
         eloFile = new File(getDataFolder(), "elo.yml");
         coinsFile = new File(getDataFolder(), "coins.yml");
         kitsFile = new File(getDataFolder(), "kits.yml");
+        questsFile = new File(getDataFolder(), "quests.yml");
         try {
             if (!eloFile.exists()) eloFile.createNewFile();
             if (!coinsFile.exists()) coinsFile.createNewFile();
             if (!kitsFile.exists()) kitsFile.createNewFile();
+            if (!questsFile.exists()) questsFile.createNewFile();
         } catch (IOException ignored) {}
         eloYaml = YamlConfiguration.loadConfiguration(eloFile);
         coinsYaml = YamlConfiguration.loadConfiguration(coinsFile);
         kitsYaml = YamlConfiguration.loadConfiguration(kitsFile);
+        questsYaml = YamlConfiguration.loadConfiguration(questsFile);
     }
 
     private void loadKits() {
